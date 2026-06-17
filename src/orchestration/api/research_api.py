@@ -124,6 +124,8 @@ from src.orchestration.memory.semantic_store import (
 from src.orchestration.session.session_schema import ResearchSession
 from src.orchestration.utils.filesystem import (
     comparison_evidence_json_path,
+    comparisons_root,
+    experiments_root,
     list_session_ids,
     memory_index_path,
     semantic_memory_index_path,
@@ -1378,6 +1380,8 @@ _VAL_METRIC_KEYS = (
     "worst_split_drawdown_pct",
     "consistency_tier",
 )
+# Minimum metric set required for comparison and post-run review to proceed
+_CORE_REQUIRED_METRICS: tuple[str, ...] = ("sharpe_ratio",)
 
 
 def get_experiment_metrics(
@@ -1445,6 +1449,80 @@ def get_experiment_metrics(
     }
 
 
+def _missing_core_metrics(metrics_result: dict[str, Any]) -> list[str]:
+    """Return the names of core metrics that are None or absent (never invented).
+
+    Used as a gate before comparison, review, and evidence persistence.
+    """
+    if metrics_result.get("status") == "not_found":
+        return list(_CORE_REQUIRED_METRICS)
+    m = metrics_result.get("metrics") or {}
+    return [k for k in _CORE_REQUIRED_METRICS if m.get(k) is None]
+
+
+def verify_experiment_artifacts(
+    experiment_name: str,
+    base: Path | str | None = None,
+    reports_base: Path | str | None = None,
+) -> dict[str, Any]:
+    """Verify that artefacts for one experiment are present and complete.
+
+    Checks artefact_root, metrics_path, JSON parseability, required metric
+    presence, report_path, and plots_dir.  Returns ``artefact_status``
+    ``"complete"`` or ``"incomplete"``.  No LLM, no execution, no invention.
+    """
+    from src.orchestration.utils.filesystem import (
+        experiment_root as _exp_root,
+        metrics_path as _metrics_p,
+        plots_dir as _plots_dir,
+        report_markdown_path,
+    )
+    from src.orchestration.utils.serialization import load_json
+
+    root = _exp_root(experiment_name, base)
+    m_path = _metrics_p(experiment_name, base)
+    report_p = report_markdown_path(experiment_name, reports_base)
+    plots_p = _plots_dir(experiment_name, base)
+
+    metrics_parseable = False
+    parsed_metrics: dict[str, Any] = {}
+    if m_path.exists():
+        try:
+            data = load_json(m_path)
+            if isinstance(data, dict):
+                metrics_parseable = True
+                parsed_metrics = data
+        except Exception:  # noqa: BLE001
+            metrics_parseable = False
+
+    required = list(_CORE_REQUIRED_METRICS)
+    missing_required = [k for k in required if parsed_metrics.get(k) is None]
+
+    artefact_status = (
+        "complete"
+        if (
+            root.exists()
+            and m_path.exists()
+            and metrics_parseable
+            and not missing_required
+        )
+        else "incomplete"
+    )
+
+    return {
+        "status": "ok",
+        "experiment_name": experiment_name,
+        "artefact_root_exists": root.exists(),
+        "metrics_path_exists": m_path.exists(),
+        "metrics_parseable": metrics_parseable,
+        "required_metrics_present": not missing_required,
+        "report_path_exists": report_p.exists(),
+        "plots_dir_exists": plots_p.exists(),
+        "missing_metrics": missing_required,
+        "artefact_status": artefact_status,
+    }
+
+
 def compare_experiment_metrics(
     base_experiment_name: str,
     candidate_experiment_name: str,
@@ -1486,6 +1564,32 @@ def compare_experiment_metrics(
             "base_experiment": base_experiment_name,
             "candidate_experiment": candidate_experiment_name,
             "missing_experiments": missing_experiments,
+        }
+
+    # Refuse comparison when core metrics are present-but-None (avoids TypeError
+    # propagation and prevents evidence being written from incomplete artefacts)
+    incomplete_exps: list[str] = []
+    for _exp_name, _exp_res in (
+        (base_experiment_name, base_res),
+        (candidate_experiment_name, cand_res),
+    ):
+        if _missing_core_metrics(_exp_res):
+            incomplete_exps.append(_exp_name)
+    if incomplete_exps:
+        _details = "; ".join(
+            f"{n}: missing {', '.join(_missing_core_metrics(r))}"
+            for n, r in (
+                (base_experiment_name, base_res),
+                (candidate_experiment_name, cand_res),
+            )
+            if _missing_core_metrics(r)
+        )
+        return {
+            "status": "incomplete_metrics",
+            "base_experiment": base_experiment_name,
+            "candidate_experiment": candidate_experiment_name,
+            "incomplete_experiments": incomplete_exps,
+            "details": _details,
         }
 
     bm = base_res["metrics"]
@@ -1548,12 +1652,20 @@ def _persist_comparison_evidence(
     base_name = result["base_experiment"]
     candidate_name = result["candidate_experiment"]
 
+    # Classify intervention type from tested_change (no LLM)
+    intervention_meta: dict[str, str | None] = {"intervention_type": None, "intervention_confidence": None}
+    if tested_change:
+        from src.orchestration.analysis.intervention_classifier import classify_text
+        intervention_meta = classify_text(tested_change)  # type: ignore[assignment]
+
     evidence = {
         "artefact_type": "comparison_evidence",
         "base_experiment_name": base_name,
         "candidate_experiment_name": candidate_name,
         "research_question": research_question,
         "tested_change": tested_change,
+        "intervention_type": intervention_meta.get("intervention_type"),
+        "intervention_confidence": intervention_meta.get("intervention_confidence"),
         "session_id": session_id,
         "base_metrics": {
             "sharpe_ratio": result["base_sharpe"],
@@ -1677,6 +1789,677 @@ def _comparison_conclusion(r: dict[str, Any]) -> str:
     else:
         parts.append("candidate has no detected failure modes")
     return "; ".join(parts) + "."
+
+
+# ---------------------------------------------------------------------------
+# Experiment intelligence helpers
+# ---------------------------------------------------------------------------
+
+_FM_PENALTIES: dict[str, float] = {
+    "catastrophic_split": 0.30,
+    "poor_oos_consistency": 0.20,
+}
+_FM_PENALTY_DEFAULT = 0.10
+
+_ROBUSTNESS_FORMULA = (
+    "0.5×mean_oos_sharpe + 0.3×sharpe_ratio + 0.2×(max_drawdown_pp/100) "
+    "− penalty(catastrophic_split=0.30, poor_oos_consistency=0.20, other=0.10 each); "
+    "missing inputs contribute 0"
+)
+
+
+def _robustness_score(
+    sharpe: float | None,
+    mean_oos: float | None,
+    dd_pct: float | None,
+    failure_modes: list[str],
+) -> float | None:
+    """Compute robustness_score; returns None only when all metric inputs are None."""
+    if sharpe is None and mean_oos is None and dd_pct is None:
+        return None
+    score = 0.0
+    if mean_oos is not None:
+        score += 0.5 * mean_oos
+    if sharpe is not None:
+        score += 0.3 * sharpe
+    if dd_pct is not None:
+        score += 0.2 * (dd_pct / 100.0)
+    for mode in failure_modes:
+        score -= _FM_PENALTIES.get(mode, _FM_PENALTY_DEFAULT)
+    return round(score, 4)
+
+
+def _scan_comparison_evidence(
+    comparisons_base: Path | str | None,
+    experiment_prefix: str | None = None,
+) -> list[dict[str, Any]]:
+    """Scan comparisons dir for all evidence records; optionally filter by prefix."""
+    from src.orchestration.utils.serialization import load_json
+
+    root = comparisons_root(comparisons_base)
+    records: list[dict] = []
+    if not root.exists():
+        return records
+    for path in sorted(root.glob("*/comparison_evidence.json")):
+        try:
+            data = load_json(path)
+            if not isinstance(data, dict):
+                continue
+            if experiment_prefix:
+                base_n = data.get("base_experiment_name") or ""
+                cand_n = data.get("candidate_experiment_name") or ""
+                if not (base_n.startswith(experiment_prefix) or cand_n.startswith(experiment_prefix)):
+                    continue
+            records.append(data)
+        except Exception:  # noqa: BLE001
+            continue
+    return records
+
+
+_SUPPORTED_RANK_METRICS = frozenset({"sharpe_ratio", "mean_oos_sharpe", "max_drawdown_pct", "robustness_score"})
+
+
+# ---------------------------------------------------------------------------
+# Part B — rank_experiment_variants
+# ---------------------------------------------------------------------------
+
+
+def rank_experiment_variants(
+    experiment_prefix: str | None = None,
+    metric: str = "robustness_score",
+    top_k: int | None = None,
+    include_failure_modes: bool = True,
+    experiments_base: Path | str | None = None,
+) -> dict[str, Any]:
+    """Rank experiment variants by a chosen metric using authoritative artefact metrics.
+
+    Reads ``metrics.json`` + validation split diagnostics for each experiment.
+    Missing metrics are noted per-experiment and never invented.  No LLM,
+    no RAG, no execution.
+
+    Supported ranking metrics
+    -------------------------
+    ``sharpe_ratio``, ``mean_oos_sharpe``, ``max_drawdown_pct`` (higher =
+    less negative = better), ``robustness_score`` (composite formula).
+
+    robustness_score formula (transparent)
+    ---------------------------------------
+    0.5×mean_oos_sharpe + 0.3×sharpe_ratio + 0.2×(max_drawdown_pp/100)
+    − Σ failure_mode_penalty.
+    """
+    from src.orchestration.utils.filesystem import list_experiments as _le
+
+    if metric not in _SUPPORTED_RANK_METRICS:
+        return {
+            "status": "invalid_metric",
+            "metric": metric,
+            "supported_metrics": sorted(_SUPPORTED_RANK_METRICS),
+            "errors": [
+                f"Unsupported metric '{metric}'. "
+                f"Choose from: {sorted(_SUPPORTED_RANK_METRICS)}"
+            ],
+        }
+
+    names = _le(experiments_base)
+    if experiment_prefix:
+        names = [n for n in names if n.startswith(experiment_prefix)]
+
+    items: list[dict[str, Any]] = []
+    for name in names:
+        res = get_experiment_metrics(name, base=experiments_base)
+        m = res.get("metrics") or {}
+        modes: list[str] = (res.get("failure_modes") or []) if include_failure_modes else []
+
+        sharpe = m.get("sharpe_ratio")
+        mean_oos = m.get("mean_oos_sharpe")
+        dd_pct = _pct_to_float(m.get("max_drawdown_pct"))
+
+        rob = _robustness_score(sharpe, mean_oos, dd_pct, modes)
+
+        item: dict[str, Any] = {
+            "experiment_name": name,
+            "sharpe_ratio": sharpe,
+            "mean_oos_sharpe": mean_oos,
+            "max_drawdown_pct": dd_pct,
+            "robustness_score": rob,
+            "missing_metrics": res.get("missing_metrics") or [],
+            "metrics_path": res.get("metrics_path"),
+        }
+        if include_failure_modes:
+            item["failure_modes"] = modes
+        items.append(item)
+
+    def _sort_key(it: dict) -> float:
+        val = it.get(metric)
+        return float("-inf") if val is None else float(val)
+
+    items.sort(key=_sort_key, reverse=True)  # higher is always better after pct conversion
+
+    for i, it in enumerate(items, 1):
+        it["rank"] = i
+
+    if top_k is not None:
+        items = items[:max(0, top_k)]
+
+    return {
+        "status": "ok",
+        "experiment_prefix": experiment_prefix,
+        "metric": metric,
+        "robustness_score_formula": _ROBUSTNESS_FORMULA,
+        "total_experiments": len(names),
+        "returned": len(items),
+        "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part C — summarise_experiment_family
+# ---------------------------------------------------------------------------
+
+
+def summarise_experiment_family(
+    experiment_prefix: str,
+    include_comparisons: bool = True,
+    include_intervention_types: bool = True,
+    experiments_base: Path | str | None = None,
+    comparisons_base: Path | str | None = None,
+) -> dict[str, Any]:
+    """Summarise what has been learned across a family of related experiments.
+
+    Deterministic from authoritative artefact metrics and comparison evidence.
+    No LLM, no RAG, no execution.
+    """
+    from src.orchestration.analysis.intervention_classifier import classify_text
+    from src.orchestration.utils.filesystem import list_experiments as _le
+
+    names = [n for n in _le(experiments_base) if n.startswith(experiment_prefix)]
+    if not names:
+        return {
+            "status": "not_found",
+            "experiment_prefix": experiment_prefix,
+            "errors": [f"No experiments found with prefix '{experiment_prefix}'."],
+        }
+
+    metrics_by_name: dict[str, dict] = {}
+    failure_modes_by_name: dict[str, list[str]] = {}
+    all_failure_mode_counts: dict[str, int] = {}
+
+    for name in names:
+        res = get_experiment_metrics(name, base=experiments_base)
+        metrics_by_name[name] = res.get("metrics") or {}
+        modes = res.get("failure_modes") or []
+        failure_modes_by_name[name] = modes
+        for m in modes:
+            all_failure_mode_counts[m] = all_failure_mode_counts.get(m, 0) + 1
+
+    common_failure_modes = [
+        m
+        for m, cnt in sorted(all_failure_mode_counts.items(), key=lambda x: -x[1])
+        if cnt >= max(1, len(names) // 2)
+    ]
+
+    def _best_by(key: str, higher_better: bool = True) -> str | None:
+        pairs = [(n, m.get(key)) for n, m in metrics_by_name.items() if m.get(key) is not None]
+        if not pairs:
+            return None
+        return (max if higher_better else min)(pairs, key=lambda x: x[1])[0]
+
+    best_sharpe = _best_by("sharpe_ratio", True)
+    best_oos = _best_by("mean_oos_sharpe", True)
+
+    dd_pairs = [(n, _pct_to_float(m.get("max_drawdown_pct"))) for n, m in metrics_by_name.items()]
+    dd_pairs = [(n, v) for n, v in dd_pairs if v is not None]
+    lowest_drawdown = max(dd_pairs, key=lambda x: x[1])[0] if dd_pairs else None
+
+    comparison_highlights: list[dict] = []
+    intervention_types_tested: list[str] = []
+
+    if include_comparisons or include_intervention_types:
+        for ev in _scan_comparison_evidence(comparisons_base, experiment_prefix):
+            if include_intervention_types:
+                itype = ev.get("intervention_type") or ""
+                if not itype:
+                    itype = classify_text(ev.get("tested_change") or "").get("intervention_type", "")
+                if itype and itype != "unknown_change" and itype not in intervention_types_tested:
+                    intervention_types_tested.append(itype)
+
+            if include_comparisons:
+                deltas = ev.get("metric_deltas") or {}
+                comparison_highlights.append({
+                    "base": ev.get("base_experiment_name") or "",
+                    "candidate": ev.get("candidate_experiment_name") or "",
+                    "tested_change": ev.get("tested_change") or "",
+                    "delta_sharpe": deltas.get("delta_sharpe"),
+                    "delta_mean_oos_sharpe": deltas.get("delta_mean_oos_sharpe"),
+                    "conclusion": (ev.get("conclusion") or "")[:200],
+                })
+
+    # Deterministic lessons from metrics + comparisons
+    lessons: list[str] = []
+
+    oos_vals = [m.get("mean_oos_sharpe") for m in metrics_by_name.values() if m.get("mean_oos_sharpe") is not None]
+    if oos_vals:
+        if all(v < 0 for v in oos_vals):
+            lessons.append(
+                "OOS Sharpe is negative across all variants — "
+                "no tested variant achieves consistent OOS profitability."
+            )
+        elif "poor_oos_consistency" in common_failure_modes:
+            lessons.append(
+                "poor_oos_consistency is a persistent failure mode — "
+                "OOS stability remains unresolved across the family."
+            )
+
+    sharpe_vals = [m.get("sharpe_ratio") for m in metrics_by_name.values() if m.get("sharpe_ratio") is not None]
+    if len(sharpe_vals) >= 2:
+        lo, hi = round(min(sharpe_vals), 3), round(max(sharpe_vals), 3)
+        lessons.append(f"Headline Sharpe spread: {lo} to {hi} (range {round(hi - lo, 3)}).")
+
+    for h in comparison_highlights:
+        d_s = h.get("delta_sharpe")
+        d_o = h.get("delta_mean_oos_sharpe")
+        tc = h.get("tested_change") or ""
+        if d_s is None or d_o is None:
+            continue
+        if d_s > 0 and d_o < 0:
+            lessons.append(
+                f"'{tc}': headline Sharpe +{d_s:.3f} but mean OOS Sharpe {d_o:+.3f} "
+                "— Sharpe/OOS tradeoff observed."
+            )
+        elif d_s > 0 and d_o > 0:
+            lessons.append(f"'{tc}': both headline Sharpe +{d_s:.3f} and OOS Sharpe +{d_o:.3f} improved.")
+        elif d_s < 0 and d_o < 0:
+            lessons.append(
+                f"'{tc}': both Sharpe {d_s:+.3f} and OOS Sharpe {d_o:+.3f} worsened — avoid repeating."
+            )
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "experiment_prefix": experiment_prefix,
+        "experiment_count": len(names),
+        "experiments": names,
+        "best_sharpe_experiment": best_sharpe,
+        "best_oos_sharpe_experiment": best_oos,
+        "lowest_drawdown_experiment": lowest_drawdown,
+        "common_failure_modes": common_failure_modes,
+        "all_failure_mode_counts": all_failure_mode_counts,
+        "comparison_highlights": comparison_highlights,
+        "lessons_learned": lessons,
+    }
+    if include_intervention_types:
+        result["intervention_types_tested"] = intervention_types_tested
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Part D — check_research_idea_history
+# ---------------------------------------------------------------------------
+
+
+def check_research_idea_history(
+    query: str,
+    experiment_prefix: str | None = None,
+    intervention_type: str | None = None,
+    top_k: int | None = None,
+    comparisons_base: Path | str | None = None,
+) -> dict[str, Any]:
+    """Check whether a similar research idea has already been tested.
+
+    Scans persisted comparison_evidence records and returns relevant matches
+    ranked by keyword relevance.  This tool is **advisory only** — it does not
+    block the user from proceeding, but warns clearly when an idea has failed or
+    produced mixed results.  No LLM, no execution.
+    """
+    from src.orchestration.analysis.intervention_classifier import classify_text
+
+    all_records = _scan_comparison_evidence(comparisons_base, experiment_prefix)
+
+    query_lower = query.lower()
+    query_words = [w for w in query_lower.split() if len(w) >= 3]
+
+    results: list[dict[str, Any]] = []
+    for ev in all_records:
+        # Filter by intervention_type if requested
+        ev_itype = ev.get("intervention_type") or ""
+        if not ev_itype:
+            ev_itype = classify_text(ev.get("tested_change") or "").get("intervention_type", "")
+        if intervention_type and ev_itype != intervention_type:
+            continue
+
+        # Compute keyword relevance score
+        haystack = " ".join(filter(None, [
+            ev.get("tested_change") or "",
+            ev.get("research_question") or "",
+            ev.get("conclusion") or "",
+        ])).lower()
+        score = sum(1 for w in query_words if w in haystack)
+        if score == 0 and query_words:
+            continue
+
+        deltas = ev.get("metric_deltas") or {}
+        d_s = deltas.get("delta_sharpe")
+        d_o = deltas.get("delta_mean_oos_sharpe")
+        modes_cand = list(ev.get("failure_modes_candidate") or [])
+        modes_base = set(ev.get("failure_modes_base") or [])
+        failure_modes_persisted = bool(set(modes_cand) & modes_base)
+
+        recommendation = _idea_recommendation(d_s, d_o, modes_cand)
+
+        results.append({
+            "relevance_score": score,
+            "base_experiment_name": ev.get("base_experiment_name") or "",
+            "candidate_experiment_name": ev.get("candidate_experiment_name") or "",
+            "tested_change": ev.get("tested_change") or "",
+            "intervention_type": ev_itype or "unknown_change",
+            "delta_sharpe": d_s,
+            "delta_mean_oos_sharpe": d_o,
+            "failure_modes_candidate": modes_cand,
+            "failure_modes_persisted": failure_modes_persisted,
+            "conclusion": (ev.get("conclusion") or "")[:300],
+            "recommendation": recommendation,
+        })
+
+    results.sort(key=lambda x: x["relevance_score"], reverse=True)
+    if top_k is not None:
+        results = results[:max(0, top_k)]
+
+    any_discouraged = any(r["recommendation"] == "do_not_repeat_exact_change" for r in results)
+
+    return {
+        "status": "ok",
+        "query": query,
+        "experiment_prefix": experiment_prefix,
+        "intervention_type_filter": intervention_type,
+        "total_matches": len(results),
+        "items": results,
+        "repeat_discouraged": any_discouraged,
+    }
+
+
+def _idea_recommendation(
+    d_sharpe: float | None,
+    d_oos: float | None,
+    failure_modes_cand: list[str],
+) -> str:
+    if d_sharpe is None and d_oos is None:
+        return "insufficient_data"
+    s_imp = d_sharpe is not None and d_sharpe > 0
+    o_imp = d_oos is not None and d_oos > 0
+    modes_remain = bool(failure_modes_cand)
+    if s_imp and o_imp and not modes_remain:
+        return "consider_with_caution"
+    if not s_imp and not o_imp:
+        return "do_not_repeat_exact_change"
+    if s_imp and not o_imp:
+        return "do_not_repeat_exact_change"
+    if modes_remain:
+        return "do_not_repeat_exact_change"
+    return "consider_with_caution"
+
+
+# ---------------------------------------------------------------------------
+# Part E — propose_research_plan
+# ---------------------------------------------------------------------------
+
+_PLAN_SUGGESTIONS: list[dict[str, Any]] = [
+    # Triggered by poor_oos_consistency: stronger regularisation
+    {
+        "trigger_failure_modes": {"poor_oos_consistency"},
+        "question": "Does stronger regularisation reduce OOS instability?",
+        "intervention_type": "regularisation_change",
+        "suggested_change": (
+            "Increase model.params.alpha (valid field path: model.params.alpha). "
+            "Use generate_parameter_change_draft to apply."
+        ),
+        "field_path": "model.params.alpha",
+        "match_keywords": (
+            "alpha", "regularisation", "regularization", "model.params.alpha", "l1_ratio",
+        ),
+        "caveat": "Higher alpha may reduce headline Sharpe.",
+    },
+    # Triggered by poor_oos_consistency: model type change (e.g. ElasticNet)
+    {
+        "trigger_failure_modes": {"poor_oos_consistency"},
+        "question": "Does switching to a different model type (e.g. ElasticNet) improve OOS stability?",
+        "intervention_type": "model_change",
+        "suggested_change": (
+            "Change model.type (valid field path: model.type). "
+            "Run list_supported_models to confirm available types before drafting."
+        ),
+        "field_path": "model.type",
+        "match_keywords": (
+            "model.type",            # explicit field path
+            "model type",            # human phrasing
+            "model change",          # specific phrase; "changed model" is NOT used — it is a
+                                     # substring of "changed model.params.*" (param change, not type)
+            "switch model",
+            "elasticnet",
+            "elastic net",
+            "lasso",
+            "ridgeregression",       # explicit class name patterns
+            "lassoregression",
+            "elasticnetregression",
+        ),
+        "caveat": "Model type changes require re-tuning params; inspect the current config first.",
+    },
+    # Triggered by poor_oos_consistency or high_split_sharpe_variance: longer training window
+    {
+        "trigger_failure_modes": {"poor_oos_consistency", "high_split_sharpe_variance"},
+        "question": "Does a longer training window improve OOS consistency?",
+        "intervention_type": "validation_change",
+        "suggested_change": (
+            "Adjust validation.parameters.train_months (valid field path: "
+            "validation.parameters.train_months). "
+            "Inspect the current value with inspect_experiment_config before changing."
+        ),
+        "field_path": "validation.parameters.train_months",
+        "match_keywords": (
+            "train_months", "train months", "train_period", "training window", "validation",
+        ),
+        "caveat": "Longer training windows may leave fewer OOS evaluation periods.",
+    },
+    # Triggered by catastrophic_split: replace an unstable feature
+    {
+        "trigger_failure_modes": {"catastrophic_split"},
+        "question": "Does replacing an unstable feature with a risk-adjusted variant reduce catastrophic periods?",
+        "intervention_type": "feature_replacement",
+        "suggested_change": (
+            "Replace a high-variance feature in features.entries using generate_config_change_draft "
+            "with field_path='features.entries', operation='replace'. "
+            "Run inspect_experiment_config to identify which feature to replace."
+        ),
+        "field_path": None,
+        "match_keywords": (
+            "replaced ", "replace feature", "replacing feature", "feature replacement",
+            "risk-adjusted variant", "risk_adjusted variant",
+        ),
+        "caveat": "Inspect the current feature list first — the feature to replace is experiment-specific.",
+    },
+    # General: add a new feature (no failure mode required)
+    {
+        "trigger_failure_modes": set(),
+        "question": "Does adding a new signal feature improve headline Sharpe?",
+        "intervention_type": "feature_addition",
+        "suggested_change": (
+            "Add a feature to features.entries using generate_config_change_draft "
+            "with field_path='features.entries', operation='add'. "
+            "Run list_available_features to see available feature types."
+        ),
+        "field_path": None,
+        "match_keywords": (
+            "added ", "add feature", "added feature", "new feature", "feature addition",
+            "risk_adjusted_momentum",
+        ),
+        "caveat": "Check for duplicate feature names first with inspect_experiment_config.",
+    },
+]
+
+
+def _check_step_already_tested(
+    suggestion: dict[str, Any],
+    evidence_records: list[dict[str, Any]],
+) -> tuple[bool, list[str], str]:
+    """Check if a suggestion's intervention has already been tested.
+
+    Dual match: stored ``intervention_type`` field on the evidence record, OR
+    a keyword from ``suggestion["match_keywords"]`` appearing in ``tested_change``.
+    Returns ``(is_tested, evidence_from_names, evidence_summary_str)``.
+    """
+    itype = suggestion["intervention_type"]
+    keywords: tuple[str, ...] = suggestion.get("match_keywords") or ()
+
+    matched: list[dict] = []
+    for ev in evidence_records:
+        ev_itype = ev.get("intervention_type") or ""
+        tc_lower = (ev.get("tested_change") or "").lower()
+        type_match = ev_itype == itype
+        kw_match = any(kw.lower() in tc_lower for kw in keywords)
+        if type_match or kw_match:
+            matched.append(ev)
+
+    if not matched:
+        return False, [], ""
+
+    best = matched[0]
+    cand = best.get("candidate_experiment_name") or ""
+    base = best.get("base_experiment_name") or ""
+    tc = best.get("tested_change") or ""
+    deltas = best.get("metric_deltas") or {}
+    d_s = deltas.get("delta_sharpe")
+    d_o = deltas.get("delta_mean_oos_sharpe")
+
+    parts: list[str] = []
+    if tc:
+        parts.append(f"change: '{tc}'")
+    if d_s is not None:
+        parts.append(f"Sharpe {d_s:+.3f}")
+    if d_o is not None:
+        parts.append(f"OOS Sharpe {d_o:+.3f}")
+
+    evidence_from = [cand] if cand else ([base] if base else [])
+    ref = f"{base} → {cand}" if (base and cand) else (cand or base or "unknown")
+    summary = (
+        f"Previously tested ({ref}): {', '.join(parts)}."
+        if parts
+        else f"Previously tested ({ref})."
+    )
+    return True, evidence_from, summary
+
+
+def propose_research_plan(
+    research_goal: str,
+    experiment_prefix: str,
+    max_steps: int = 3,
+    experiments_base: Path | str | None = None,
+    comparisons_base: Path | str | None = None,
+) -> dict[str, Any]:
+    """Create a small, governed research plan from existing evidence.
+
+    Deterministic from authoritative artefact metrics and comparison evidence.
+    No LLM, no RAG, no execution.  This tool does not generate drafts, approve,
+    render, or execute anything.  It is **advisory only**.
+    """
+    from src.orchestration.config_generation.draft_validator import (
+        split_field_path as _sfp,
+        change_path_allowed as _cpa,
+    )
+
+    summary = summarise_experiment_family(
+        experiment_prefix,
+        include_comparisons=True,
+        include_intervention_types=True,
+        experiments_base=experiments_base,
+        comparisons_base=comparisons_base,
+    )
+
+    if summary.get("status") != "ok":
+        return {
+            "status": "not_found",
+            "research_goal": research_goal,
+            "experiment_prefix": experiment_prefix,
+            "errors": summary.get("errors") or [f"No experiments found with prefix '{experiment_prefix}'."],
+            "plan": [],
+        }
+
+    common_failures = set(summary.get("common_failure_modes") or [])
+
+    # Scan raw evidence directly for granular keyword-level already-tested detection
+    all_evidence = _scan_comparison_evidence(comparisons_base, experiment_prefix)
+
+    def _validated_fp(fp: str | None) -> str | None:
+        if fp is None:
+            return None
+        section, field = _sfp(fp)
+        return fp if _cpa(section, field) else None
+
+    selected: list[dict[str, Any]] = []
+    seen_itypes: set[str] = set()
+
+    def _build_step(suggestion: dict[str, Any], step_num: int, triggered: bool) -> dict[str, Any]:
+        itype = suggestion["intervention_type"]
+        is_tested, evidence_from, evidence_summary = _check_step_already_tested(
+            suggestion, all_evidence
+        )
+        fp = _validated_fp(suggestion.get("field_path"))
+        triggers = suggestion["trigger_failure_modes"]
+        step: dict[str, Any] = {
+            "step": step_num,
+            "question": suggestion["question"],
+            "intervention_type": itype,
+            "status": "already_tested" if is_tested else "candidate",
+            "suggested_change": suggestion["suggested_change"],
+            "evidence": evidence_summary or (
+                f"Triggered by common failure modes: {sorted(triggers & common_failures)}."
+                if (triggered and triggers)
+                else "General research suggestion based on family summary."
+            ),
+            "supporting_evidence_from": evidence_from,
+        }
+        if fp is not None:
+            step["field_path"] = fp
+        else:
+            step["needs_config_inspection"] = True
+            step["inspect_with"] = "inspect_experiment_config"
+        if suggestion.get("caveat"):
+            step["caveat"] = suggestion["caveat"]
+        return step
+
+    # First pass: select suggestions whose failure mode triggers match, or no trigger required
+    for suggestion in _PLAN_SUGGESTIONS:
+        if len(selected) >= max_steps:
+            break
+        triggers = suggestion["trigger_failure_modes"]
+        if triggers and not (triggers & common_failures):
+            continue
+        itype = suggestion["intervention_type"]
+        if itype in seen_itypes:
+            continue
+        seen_itypes.add(itype)
+        selected.append(_build_step(suggestion, len(selected) + 1, triggered=True))
+
+    # Second pass: fill remaining slots with non-triggered suggestions
+    for suggestion in _PLAN_SUGGESTIONS:
+        if len(selected) >= max_steps:
+            break
+        itype = suggestion["intervention_type"]
+        if itype in seen_itypes:
+            continue
+        seen_itypes.add(itype)
+        selected.append(_build_step(suggestion, len(selected) + 1, triggered=False))
+
+    return {
+        "status": "ok",
+        "research_goal": research_goal,
+        "experiment_prefix": experiment_prefix,
+        "experiment_count": summary.get("experiment_count", 0),
+        "common_failure_modes": sorted(common_failures),
+        "plan": selected,
+        "advisory_note": (
+            "This plan is advisory only. It does not generate drafts, approve, render, "
+            "or execute anything. Use generate_config_change_draft or "
+            "generate_parameter_change_draft to act on a plan step."
+        ),
+    }
 
 
 def build_research_evolution_chain(

@@ -33,6 +33,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.experiments.orchestrator import PLOT_DISPLAY_NAMES as _PLOT_DISPLAY_NAMES
+
 if TYPE_CHECKING:
     from src.reporting.report_builder import ExperimentArtefacts
     from src.reporting.report_spec import ResearchReportSpec
@@ -188,8 +190,9 @@ def render_report(
 
     if spec.include_figures:
         captions = _build_figure_captions(artefacts)
-        # Only unclaimed figures reach the appendix section
-        remainder = [(dn, rp) for dn, rp in figure_paths if dn.lower().replace(" ", "_") not in claimed]
+        # Only unclaimed figures reach the appendix section.
+        # Compare by file stem (not display_name) to avoid name-collision exclusions.
+        remainder = [(dn, rp) for dn, rp in figure_paths if rp.stem not in claimed]
         figs = _figures(remainder, captions=captions)
         if figs:
             sections.append(figs)
@@ -501,6 +504,14 @@ def _ml_thesis_body(artefacts: ExperimentArtefacts) -> str:
             " eliminates the effect of aggregate market moves, focusing the model on"
             " relative outperformance — a cleaner signal for cross-sectional selection."
         ),
+        "risk_adjusted_ranking_target": (
+            "Cross-sectional risk-adjusted rank labels divide each asset's forward"
+            " return by its realised forward volatility before ranking. This targets"
+            " assets that outperform on a Sharpe-like basis rather than by raw return,"
+            " penalising high-return assets that achieved their gains through"
+            " disproportionate volatility. Assets with zero realised volatility over"
+            " the horizon are excluded from ranking on that date."
+        ),
     }
 
     # Model rationale
@@ -600,7 +611,12 @@ def _ml_thesis_body(artefacts: ExperimentArtefacts) -> str:
             ftype = entry.get("type", "")
             fname = entry.get("name", ftype)
             params = entry.get("params") or {}
-            window = params.get("window") or params.get("lookback") or params.get("span")
+            window = (
+                params.get("window")
+                or params.get("lookback")
+                or params.get("span")
+                or params.get("mom_window")
+            )
             window_str = f" (window: {window})" if window is not None else ""
             rationale = _FEAT_RATIONALE.get(ftype, f"`{ftype}` feature.")
             if ftype not in seen_types:
@@ -1207,6 +1223,16 @@ def _ml_portfolio_process_body(artefacts: ExperimentArtefacts) -> list[str]:
     entries = feat_spec.get("entries") or []
     n_features = len(entries)
 
+    # Research configuration summary (training window / horizon / retrain / rebalance)
+    _cfg = artefacts.config or {}
+    _vparams = (_cfg.get("validation") or {}).get("parameters") or {}
+    _exec = _cfg.get("execution") or {}
+    _label_params = (_cfg.get("labels") or {}).get("params") or {}
+    _train_months = _vparams.get("train_months")
+    _retrain_days = prov.get("retrain_frequency_days") or _vparams.get("retrain_frequency_days")
+    _rebalance_days = prov.get("rebalance_frequency_days") or _exec.get("rebalance_frequency_days", 1)
+    _horizon = _label_params.get("horizon") or (label_spec.get("params") or {}).get("horizon")
+
     # Portfolio construction provenance (spec_version "2"+)
     pc_prov = prov.get("portfolio_construction") or {}
     weighting_prov = pc_prov.get("weighting") or {}
@@ -1244,7 +1270,46 @@ def _ml_portfolio_process_body(artefacts: ExperimentArtefacts) -> list[str]:
     else:
         pipeline_header = f"**Signal-to-portfolio pipeline for `{model_type}` on `{ticker}`:**"
 
-    lines: list[str] = [
+    # Build research configuration table when any parameter is non-trivial
+    _config_table_rows: list[tuple[str, str]] = []
+    if _train_months:
+        _config_table_rows.append(("Training Window", f"{_train_months} months (rolling)"))
+    if _horizon:
+        _config_table_rows.append(("Forecast Horizon", f"{_horizon} trading days"))
+    if _retrain_days:
+        _config_table_rows.append(("Retrain Frequency", f"{_retrain_days} trading days"))
+    if _rebalance_days and int(_rebalance_days) != 1:
+        _config_table_rows.append(("Rebalance Frequency", f"{_rebalance_days} trading days"))
+
+    _config_summary_lines: list[str] = []
+    if _config_table_rows:
+        _config_summary_lines = [
+            "**Research configuration:**",
+            "",
+            "| Parameter | Value |",
+            "| --- | --- |",
+        ] + [f"| {k} | {v} |" for k, v in _config_table_rows] + [""]
+
+        # Build prose summary sentence
+        _parts: list[str] = []
+        if _train_months:
+            _parts.append(f"rolling {_train_months}-month training window")
+        if _horizon:
+            _parts.append(f"{_horizon}-day forward horizon")
+        if _retrain_days:
+            _parts.append(f"retrained every {_retrain_days} trading days")
+        if _rebalance_days and int(_rebalance_days) != 1:
+            _parts.append(f"portfolios rebalanced every {_rebalance_days} trading days")
+        if len(_parts) >= 2:
+            _prose = (
+                "The model uses a "
+                + ", ".join(_parts[:-1])
+                + f" and {_parts[-1]}."
+            )
+            _config_summary_lines.append(_prose)
+            _config_summary_lines.append("")
+
+    lines: list[str] = _config_summary_lines + [
         pipeline_header,
         "",
         "```",
@@ -1435,7 +1500,7 @@ def _allocation_research_section(
         "HHI (top), effective breadth (middle), and entropy effective-N (bottom) through"
         " time. Elevated HHI with depressed breadth identifies concentration regimes;"
         " periods where effective-N approaches the basket size confirm near-uniform"
-        " allocation. The 63-day rolling mean smooths daily rebalance noise to reveal"
+        " allocation. The 63-day rolling mean smooths short-term rebalance noise to reveal"
         " structural regime transitions.",
     )
     if conc_fig:
@@ -2724,7 +2789,9 @@ def _build_figure_captions(artefacts: ExperimentArtefacts) -> dict[str, str]:
         name = entry.get("name", "")
         caption = entry.get("caption", "")
         if name and caption:
-            display_name = name.replace("_", " ").title()
+            display_name = (
+                entry.get("display_name") or name.replace("_", " ").title()
+            )
             captions[display_name] = caption
     return captions
 
@@ -3621,7 +3688,7 @@ def _embed_figure(
         return ""
     rel_path = figures[stem]
     rel_str = str(rel_path).replace("\\", "/")
-    display_name = stem.replace("_", " ").title()
+    display_name = _PLOT_DISPLAY_NAMES.get(stem) or stem.replace("_", " ").title()
     parts = [f"![{display_name}]({rel_str})"]
     if interpretation:
         parts.extend(["", f"*{interpretation}*"])

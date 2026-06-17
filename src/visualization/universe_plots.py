@@ -210,9 +210,10 @@ def plot_cross_asset_volatility(
         return fig
 
     n_assets = len(df.columns)
-    # Extra height for external legend when many assets
-    legend_rows = max(1, (n_assets + 3) // 4)
-    height = FIG_HEIGHT_STANDARD + 0.3 * legend_rows
+    # Fixed 2-row legend below plot (10 assets per row)
+    legend_ncol = min(10, n_assets)
+    legend_rows = max(1, (n_assets + legend_ncol - 1) // legend_ncol)
+    height = FIG_HEIGHT_STANDARD + 0.35 * legend_rows
     fig, ax = make_figure(height=height, width=FIG_WIDTH_FULL)
 
     # Institutional qualitative palette
@@ -238,9 +239,9 @@ def plot_cross_asset_volatility(
         fontsize=get_typography().legend,
         loc="upper center",
         bbox_to_anchor=(0.5, -0.10),
-        ncol=min(4, n_assets),
+        ncol=legend_ncol,
         handlelength=1.5,
-        columnspacing=1.2,
+        columnspacing=1.0,
     )
     label_axes(ax, title=title, ylabel="Annualised Volatility (63d rolling)")
     fig.tight_layout()
@@ -288,8 +289,8 @@ def plot_universe_correlation_heatmap(
 
     import matplotlib.colors as mcolors
 
-    cell = max(0.5, min(0.9, 8.0 / n))
-    size = max(FIG_HEIGHT_STANDARD, cell * n + 1.5)
+    cell = max(0.60, min(1.0, 9.0 / n))
+    size = max(FIG_HEIGHT_STANDARD, cell * n + 2.0)
     fig, ax = make_figure(width=size + 0.8, height=size)
 
     norm = mcolors.Normalize(vmin=-1.0, vmax=1.0)
@@ -309,7 +310,7 @@ def plot_universe_correlation_heatmap(
                 ax.text(j, i, f"{v:.2f}", ha="center", va="center",
                         fontsize=font_size, color=text_color)
 
-    tick_fs = scale_dynamic_fontsize(max(6, 9 - n // 6))
+    tick_fs = scale_dynamic_fontsize(max(9, 11 - n // 8))
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
     ax.set_xticklabels(list(corr_df.columns), rotation=45, ha="right", fontsize=tick_fs)

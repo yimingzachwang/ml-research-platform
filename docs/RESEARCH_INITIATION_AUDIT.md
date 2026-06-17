@@ -6,6 +6,20 @@
 
 ---
 
+> **Status update (2026-06-10):**
+> The analysis below was written before the `src/agent/` research-design layer was built.
+> Since this audit, Phases 1–4B have addressed the upper half of the research initiation
+> pipeline: natural-language research intent is now parsed into a `ResearchSpec`,
+> deterministically resolved, checked for compatibility, planned into an `ExperimentPlan`,
+> and mapped to a validated draft configuration change — all through a governed workflow
+> with explicit approval gates. The human approval boundary remains unchanged: validated
+> drafts still require explicit `approve_experiment_draft()` before `render_draft_to_yaml()`
+> or execution. The lower half (execution triggering and iteration loop automation) remains
+> intentionally absent. See [`docs/agent_architecture.md`](agent_architecture.md) for the
+> current architecture.
+
+---
+
 ## 1. Executive Summary
 
 The platform is **approximately 65% of the way** to supporting intent-driven research initiation.

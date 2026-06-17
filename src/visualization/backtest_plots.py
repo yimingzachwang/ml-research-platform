@@ -285,10 +285,10 @@ def plot_equity_and_drawdown(
     ax_eq.axhline(1.0, color=COLORS["grid"], linewidth=0.8)
     ax_eq.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.2f}x"))
     label_axes(ax_eq, title=title, ylabel="Growth of $1")
-    ax_eq.legend(frameon=False)
+    _t = get_typography()
+    ax_eq.legend(frameon=False, fontsize=_t.legend)
 
     # Annotate total return in bottom-right corner
-    _t = get_typography()
     equity = backtest["equity_curve"].dropna()
     if len(equity) > 0:
         total_ret = float(equity.iloc[-1]) - 1.0

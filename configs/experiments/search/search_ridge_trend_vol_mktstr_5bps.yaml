@@ -1,0 +1,121 @@
+version: '2'
+name: search_ridge_trend_vol_mktstr_5bps
+description: 'Cross-sectional quantitative research experiment (Phase G-X). Ridge
+  regression predicts 21-day cross-sectional return ranks across 10 institutional
+  ETFs. Top-3 assets by predicted score are held equal-weight. Features applied independently
+  to each asset; one shared model fitted on pooled observations.
+
+  '
+tags:
+- search_6a
+- model_ridge
+- features_trend_vol_mktstr
+- cost_5bps
+- ridgeregression
+universe:
+  tickers:
+  - SPY
+  - QQQ
+  - IWM
+  - EEM
+  - TLT
+  - GLD
+  - XLF
+  - XLK
+  - XLE
+date_range:
+  start: '2013-01-01'
+  end: '2024-12-31'
+features:
+  ticker: SPY
+  entries:
+  - name: mom_5
+    type: momentum
+    params:
+      lookback: 5
+  - name: mom_20
+    type: momentum
+    params:
+      lookback: 20
+  - name: mom_60
+    type: momentum
+    params:
+      lookback: 60
+  - name: mom_252
+    type: momentum
+    params:
+      lookback: 252
+  - name: trend_20
+    type: trend_strength
+    params:
+      window: 20
+  - name: trend_persist_20d
+    type: trend_persistence
+    params:
+      window: 20
+  - name: breakout_63d
+    type: breakout_strength
+    params:
+      window: 63
+  - name: sharpe_mom_63d
+    type: risk_adjusted_momentum
+    params:
+      mom_window: 63
+      vol_window: 63
+  - name: sharpe_mom_126d
+    type: risk_adjusted_momentum
+    params:
+      mom_window: 126
+      vol_window: 63
+  - name: sharpe_mom_252d
+    type: risk_adjusted_momentum
+    params:
+      mom_window: 252
+      vol_window: 63
+  - name: vol_21
+    type: rolling_volatility
+    params:
+      window: 21
+  - name: vol_compress_21_63
+    type: vol_compression
+    params:
+      short_window: 21
+      long_window: 63
+  - name: beta_60d
+    type: rolling_beta
+    params:
+      window: 60
+      market_ticker: SPY
+labels:
+  type: ranking_target
+  params:
+    horizon: 21
+model:
+  type: RidgeRegression
+  params:
+    alpha: 1.0
+signal:
+  type: top_n
+  params:
+    n: 3
+validation:
+  type: rolling
+  parameters:
+    train_months: 48
+    test_months: 12
+    gap_days: 0
+execution:
+  transaction_cost_bps: 5.0
+output:
+  base_dir: results/experiments
+  registry_path: results/experiments/registry.json
+  register: true
+  save_plots: true
+metadata:
+  search_phase: 6A
+  candidate_id: search_ridge_trend_vol_mktstr_5bps
+  base_experiment: canonical_ml_multi_asset
+  model_id: ridge
+  feature_set_id: trend_vol_mktstr
+  cost_bps: 5
+  is_baseline: false

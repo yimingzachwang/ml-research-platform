@@ -1,0 +1,77 @@
+# Registry of supported label types.
+# Source of truth: src/experiments/ml_config._VALID_LABEL_TYPES (5 types)
+# required_params must match _LABEL_REQUIRED_PARAMS exactly.
+# Panel-only labels are flagged: requires_multi_asset: true
+# Source: PANEL_LABEL_TYPES = frozenset({"ranking_target", "risk_adjusted_ranking_target"})
+
+forward_returns:
+  display_name: Forward Returns
+  description: Raw forward return over a horizon of N periods. The regression target is the actual percentage or log return N steps ahead.
+  required_params:
+    - horizon
+  optional_params: {}
+  default_params:
+    horizon: 21
+  requires_multi_asset: false
+  notes: >
+    The most common regression label for return-prediction experiments.
+    horizon=21 ~ one month ahead. Compatible with all regression models and
+    all signal types.
+
+binary_direction:
+  display_name: Binary Direction
+  description: Binarised forward return — +1 if the asset goes up over the horizon, -1 if it goes down. The classification target for LogisticRegression.
+  required_params:
+    - horizon
+  optional_params: {}
+  default_params:
+    horizon: 21
+  requires_multi_asset: false
+  notes: >
+    Required for LogisticRegression. Not compatible with regression models if
+    used as a continuous target (they will treat +1/-1 as a continuous variable,
+    which is technically valid but loses the classification interpretation).
+
+volatility_target:
+  display_name: Volatility Target
+  description: Forward realised volatility over a horizon of N periods. The regression target is future risk rather than future return. Useful for volatility-timing models.
+  required_params:
+    - horizon
+  optional_params: {}
+  default_params:
+    horizon: 21
+  requires_multi_asset: false
+  notes: >
+    A regression model targeting future volatility can be used to scale position
+    sizes dynamically. Not a return-prediction target.
+
+ranking_target:
+  display_name: Ranking Target (Cross-Sectional)
+  description: Cross-sectional rank of forward returns among all assets in the universe at each time step. The model learns to rank assets rather than predict absolute returns.
+  required_params:
+    - horizon
+  optional_params: {}
+  default_params:
+    horizon: 21
+  requires_multi_asset: true
+  notes: >
+    Requires a multi-asset universe (PANEL_LABEL_TYPES). The engine raises
+    NotImplementedError if used with a single-asset universe.
+    Best paired with top_n, long_short, or normalize signals.
+
+risk_adjusted_ranking_target:
+  display_name: Risk-Adjusted Ranking Target (Cross-Sectional)
+  description: Cross-sectional rank of risk-adjusted forward returns (forward_return / realized_vol) among all assets in the universe at each time step. The model learns to rank assets by Sharpe-like ratio rather than raw return.
+  required_params:
+    - horizon
+  optional_params: {}
+  default_params:
+    horizon: 21
+  requires_multi_asset: true
+  notes: >
+    Requires a multi-asset universe (PANEL_LABEL_TYPES). Sibling of
+    ranking_target; replaces raw forward returns with a Sharpe-like ratio
+    (forward_return / realized_vol) before cross-sectional ranking.
+    Assets with zero realized volatility over the horizon are excluded from
+    ranking on that date (NaN rank). Minimum meaningful horizon is 2.
+    Best paired with top_n, long_short, or normalize signals.

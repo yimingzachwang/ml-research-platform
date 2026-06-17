@@ -1,0 +1,117 @@
+# Default field resolution policy.
+# Used by the future resolver (Phase 2) to decide how to handle missing fields.
+# This file is data only — the resolver is not implemented in Phase 1.
+#
+# Policy modes:
+#   required_user_choice     - Must be provided by the user; no default will be injected.
+#   recommended_default_allowed - A recommended default exists; the resolver may inject it.
+#   derived_from_context     - Value is inferred from other spec fields; no explicit default.
+#   safe_default_allowed     - A safe/conservative default exists; the resolver may inject it.
+
+default_mode: recommended
+
+field_policies:
+  asset_class:
+    policy: required_user_choice
+    notes: >
+      The asset class determines signal/label compatibility and universe selection.
+      The resolver cannot safely guess this from a blank spec.
+
+  universe:
+    policy: recommended_default_allowed
+    recommended_default: canonical_multi_asset_etfs
+    notes: >
+      If asset_class is multi_asset and no universe is specified, the resolver
+      may suggest canonical_multi_asset_etfs. User confirmation required.
+
+  tickers:
+    policy: derived_from_context
+    notes: >
+      If universe is set to a named preset, tickers are derived from
+      config/registry/universes.yaml. If universe is custom_ticker_list,
+      tickers must be provided by the user.
+
+  timeframe:
+    policy: recommended_default_allowed
+    recommended_start: "2015-01-01"
+    recommended_end: null   # null = use most recent available data
+    notes: >
+      Default timeframe starts 2015-01-01 for data quality. End date defaults
+      to the most recent available data in the price database.
+
+  frequency:
+    policy: derived_from_context
+    notes: Monthly is the default for all current supported configurations.
+
+  model:
+    policy: recommended_default_allowed
+    recommended_default: RidgeRegression
+    recommended_params:
+      alpha: 1.0
+    notes: >
+      RidgeRegression with alpha=1.0 is the default regression model.
+      For classification (binary labels), the resolver should suggest
+      LogisticRegression.
+
+  features:
+    policy: recommended_default_allowed
+    recommended_default_set:
+      - type: momentum
+        params:
+          lookback: 252
+      - type: rolling_volatility
+        params:
+          window: 21
+      - type: trend_strength
+        params:
+          window: 63
+    notes: >
+      Momentum + volatility + trend_strength is the conservative default feature
+      set. The resolver should suggest expanding based on the asset class.
+
+  label:
+    policy: recommended_default_allowed
+    recommended_default: forward_returns
+    recommended_params:
+      horizon: 21
+    notes: >
+      forward_returns with horizon=21 is the default regression target.
+      For multi-asset experiments the resolver may also suggest ranking_target.
+
+  signal:
+    policy: derived_from_context
+    notes: >
+      Signal is derived from universe size and label type.
+      Single-asset → sign. Multi-asset regression → top_n or long_short.
+      Multi-asset ranking → top_n or long_short.
+
+  validation:
+    policy: safe_default_allowed
+    safe_default: rolling
+    safe_default_params:
+      train_months: 36
+      test_months: 6
+      gap_days: 0
+    notes: >
+      Rolling walk-forward with 36-month train / 6-month test is the
+      conservative default. Expanding is also valid.
+
+  transaction_cost_bps:
+    policy: recommended_default_allowed
+    recommended_default: 10
+    notes: >
+      10 bps is a conservative institutional assumption for liquid ETFs.
+      Lower for large-cap single equities; higher for small-cap or illiquid assets.
+
+  benchmark:
+    policy: safe_default_allowed
+    safe_default: SPY
+    notes: >
+      SPY is the default benchmark for US equity and multi-asset experiments.
+      The resolver should override this based on the dominant asset class.
+
+  diagnostics:
+    policy: safe_default_allowed
+    safe_default:
+      - split_metrics
+    notes: split_metrics is always recommended; feature_importance for linear models.

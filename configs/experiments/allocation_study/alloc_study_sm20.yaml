@@ -93,6 +93,16 @@ features:
       params:
         window: 60
         market_ticker: SPY
+    - name: sharpe_mom_63d
+      type: risk_adjusted_momentum
+      params:
+        mom_window: 63
+        vol_window: 63
+    - name: sharpe_mom_126d
+      type: risk_adjusted_momentum
+      params:
+        mom_window: 126
+        vol_window: 63
     - name: sharpe_mom_252d
       type: risk_adjusted_momentum
       params:

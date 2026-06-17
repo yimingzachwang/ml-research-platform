@@ -1,0 +1,80 @@
+# Ticker taxonomy for asset class classification.
+# Used by the future resolver and reporting layer.
+# Mirrors the hardcoded groupings in src/reporting/markdown._universe_asset_description()
+# but does NOT modify that function (Phase 1 boundary).
+# Also aligns with src/visualization/portfolio_plots._TICKER_COLORS.
+
+equity_index:
+  display_name: US Equity Index
+  description: Broad US equity market index ETFs tracking major capitalisation tiers.
+  tickers:
+    - SPY    # S&P 500 — US large-cap
+    - QQQ    # Nasdaq 100 — US mega-cap tech
+    - IWM    # Russell 2000 — US small-cap
+    - VTI    # Vanguard Total Stock Market
+    - DIA    # DJIA ETF
+
+sector_equity:
+  display_name: US Sector Equity
+  description: SPDR sector ETFs carving up the S&P 500 by GICS sector.
+  tickers:
+    - XLF    # Financials
+    - XLK    # Technology
+    - XLE    # Energy
+    - XLV    # Health Care
+    - XLI    # Industrials
+    - XLY    # Consumer Discretionary
+    - XLP    # Consumer Staples
+    - XLU    # Utilities
+    - XLRE   # Real Estate
+
+international_equity:
+  display_name: International Equity
+  description: Broad international equity index ETFs (developed and emerging markets).
+  tickers:
+    - EEM    # iShares MSCI Emerging Markets
+    - EFA    # iShares MSCI EAFE — developed international
+    - VEA    # Vanguard FTSE Developed Markets
+    - VWO    # Vanguard FTSE Emerging Markets
+
+rates:
+  display_name: Fixed Income / Rates
+  description: Treasury, aggregate bond, and inflation-linked fixed income ETFs.
+  tickers:
+    - TLT    # iShares 20yr Treasury — long duration
+    - IEF    # iShares 7-10yr Treasury — intermediate
+    - SHY    # iShares 1-3yr Treasury — short duration
+    - AGG    # iShares Core US Aggregate Bond
+    - BND    # Vanguard Total Bond Market
+    - TIP    # iShares TIPS — inflation-linked
+
+credit:
+  display_name: Credit
+  description: High yield, investment grade, and credit risk ETFs.
+  tickers:
+    - HYG    # iShares High Yield Corp Bond
+    - LQD    # iShares Investment Grade Corp Bond
+    - JNK    # SPDR Barclays High Yield Bond
+
+commodity:
+  display_name: Commodity
+  description: Hard and broad commodity ETFs.
+  tickers:
+    - GLD    # SPDR Gold
+    - SLV    # iShares Silver
+    - USO    # United States Oil Fund
+    - DBC    # Invesco DB Commodity (broad)
+
+real_estate:
+  display_name: Real Estate (REITs)
+  description: Real estate investment trust ETFs.
+  tickers:
+    - VNQ    # Vanguard Real Estate ETF
+    - IYR    # iShares US Real Estate
+
+custom:
+  display_name: Custom / User-Defined
+  description: >
+    Placeholder for user-supplied tickers that do not match a known category.
+    The resolver will assign this class to unknown tickers.
+  tickers: []

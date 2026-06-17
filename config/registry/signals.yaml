@@ -1,0 +1,72 @@
+# Registry of supported signal/weight-conversion types.
+# Source of truth: src/experiments/ml_config._VALID_SIGNAL_TYPES (5 types)
+# required_params must match _SIGNAL_REQUIRED_PARAMS exactly.
+# Panel-only signals are flagged: requires_multi_asset: true
+# Source: PANEL_SIGNAL_TYPES = frozenset({"top_n", "long_short", "normalize"})
+
+sign:
+  display_name: Sign
+  description: Binary direction signal. Converts model predictions to +1 (long) or -1 (short) based on sign of the prediction. Equal magnitude in all positions.
+  required_params: []
+  optional_params: {}
+  default_params: {}
+  requires_multi_asset: false
+  notes: >
+    No parameters required. Works on single-asset and multi-asset experiments.
+    Prediction magnitude is discarded — only direction is preserved.
+
+threshold:
+  display_name: Threshold
+  description: Threshold-based binary signal. Generates a position only when the prediction exceeds a threshold. Zero position within the dead band.
+  required_params: []
+  optional_params:
+    threshold:
+      type: float
+      change_path: signal.params.threshold
+      notes: Magnitude cutoff. Predictions between [-threshold, +threshold] produce no position.
+  default_params: {}
+  requires_multi_asset: false
+  notes: >
+    The threshold param is optional; if omitted the engine uses a default of 0.
+    Works on single-asset and multi-asset experiments.
+
+top_n:
+  display_name: Top-N Long-Only
+  description: Selects the N highest-ranked assets by prediction score and allocates equal weight to each. All other assets receive zero weight. Long-only.
+  required_params:
+    - n
+  optional_params: {}
+  default_params:
+    n: 3
+  requires_multi_asset: true
+  notes: >
+    Requires a multi-asset universe (PANEL_SIGNAL_TYPES). The engine raises
+    NotImplementedError if used with a single-asset universe.
+    change_path: signal.params.n
+
+long_short:
+  display_name: Long-Short
+  description: Selects the top n_long assets as longs and the bottom n_short assets as shorts. Implements a classic long-short factor portfolio.
+  required_params:
+    - n_long
+    - n_short
+  optional_params: {}
+  default_params:
+    n_long: 3
+    n_short: 3
+  requires_multi_asset: true
+  notes: >
+    Requires a multi-asset universe (PANEL_SIGNAL_TYPES). The engine raises
+    NotImplementedError if used with a single-asset universe.
+    change_paths: signal.params.n_long, signal.params.n_short
+
+normalize:
+  display_name: Cross-Sectional Normalisation
+  description: Normalises predictions cross-sectionally to sum to 1.0 (long-only) or to zero (long-short, depending on the implementation). Preserves relative ranking.
+  required_params: []
+  optional_params: {}
+  default_params: {}
+  requires_multi_asset: true
+  notes: >
+    Requires a multi-asset universe (PANEL_SIGNAL_TYPES). The engine raises
+    NotImplementedError if used with a single-asset universe.

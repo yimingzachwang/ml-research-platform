@@ -93,3 +93,50 @@ def ranking_target(prices: pd.DataFrame, horizon: int) -> pd.DataFrame:
     """
     fwd = prices.pct_change(horizon).shift(-horizon)
     return fwd.rank(axis=1, pct=True)
+
+
+def risk_adjusted_ranking_target(prices: pd.DataFrame, horizon: int) -> pd.DataFrame:
+    """Cross-sectional percentile rank of risk-adjusted forward returns.
+
+    At each row t, assets are ranked by their horizon-period Sharpe-like ratio:
+
+        risk_adjusted_return = forward_return / realized_vol
+
+    where:
+        forward_return = (price[t+h] / price[t]) - 1
+        realized_vol   = std(daily_returns[t+1 : t+h+1])   (ddof=1)
+
+    Rank values are in (0, 1]; a higher rank means a better risk-adjusted
+    forward return. Ties are broken by averaging.
+
+    The last `horizon` rows will be all NaN (no future data available).
+
+    Edge cases:
+        Zero realized volatility: assets with realized_vol == 0 are assigned
+            NaN for that date and excluded from cross-sectional ranking on that
+            date. Ranks for remaining assets are recomputed on the available
+            subset. This is the correct financial interpretation: a Sharpe ratio
+            is undefined when there is no price movement over the horizon.
+        NaN prices: propagated as NaN through forward return and volatility
+            computation; those (date, asset) cells are excluded from ranking.
+        horizon == 1: rolling(1).std() is NaN under ddof=1 (undefined standard
+            deviation of a single value). All ranks will be NaN at horizon=1.
+            The minimum meaningful horizon for this label is 2.
+
+    Args:
+        prices: Price DataFrame (DatetimeIndex × assets).
+        horizon: Prediction horizon in trading days (>= 2 for meaningful output).
+
+    Returns:
+        DataFrame of the same shape as prices with percentile ranks in (0, 1].
+    """
+    fwd = prices.pct_change(horizon).shift(-horizon)
+
+    daily_returns = prices.pct_change()
+    vol = daily_returns.rolling(horizon).std().shift(-horizon)
+
+    # Zero volatility → NaN, not ±inf; excluded from cross-sectional ranking
+    vol_safe = vol.where(vol > 0, other=float("nan"))
+
+    ra_return = fwd / vol_safe
+    return ra_return.rank(axis=1, pct=True)

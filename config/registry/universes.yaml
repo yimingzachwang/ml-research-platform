@@ -1,0 +1,165 @@
+# Registry of named universe presets.
+# These provide starting points for experiment design.
+# The tickers for core_etfs and extended_etfs mirror configs/universes/*.yaml.
+# custom_ticker_list is a template for user-defined universes.
+
+canonical_multi_asset_etfs:
+  display_name: Canonical Multi-Asset ETF Universe
+  asset_class: multi_asset
+  tickers:
+    - SPY    # S&P 500 — US large-cap equities
+    - QQQ    # Nasdaq 100 — US technology / growth
+    - IWM    # Russell 2000 — US small-cap equities
+    - EEM    # iShares MSCI Emerging Markets
+    - EFA    # iShares MSCI EAFE — developed international
+    - TLT    # iShares 20yr Treasury — long-duration rates
+    - IEF    # iShares 7-10yr Treasury — intermediate rates
+    - GLD    # SPDR Gold — commodity / safe haven
+    - XLF    # SPDR Financials
+    - XLK    # SPDR Technology
+    - XLE    # SPDR Energy
+    - HYG    # iShares High Yield Corp Bond — credit
+    - AGG    # iShares Core US Aggregate Bond
+  frequency: monthly
+  description: >
+    13-ETF universe spanning US equity size factors, international equities,
+    rates, commodities, sectors, and credit. Broad cross-asset coverage for
+    factor and rotation research.
+  source: registry
+  notes: >
+    This is the primary multi-asset preset for institutional factor research.
+    All tickers are highly liquid with continuous history from 2010+.
+
+core_etfs:
+  display_name: Core ETFs (10-Ticker)
+  asset_class: multi_asset
+  tickers:
+    - SPY    # S&P 500
+    - QQQ    # Nasdaq 100
+    - IWM    # Russell 2000
+    - TLT    # 20yr Treasury
+    - GLD    # Gold
+    - XLF    # Financials
+    - XLK    # Technology
+    - XLE    # Energy
+    - EEM    # Emerging Markets
+    - EFA    # EAFE (developed international)
+  frequency: monthly
+  description: >
+    Core 10-ETF universe used in initial multi-asset research. Covers US equity
+    beta, sector concentration, fixed income, commodities, and EM.
+  source: configs/universes/core_etfs.yaml
+  notes: Mirrors configs/universes/core_etfs.yaml.
+
+extended_etfs:
+  display_name: Extended ETFs (15-Ticker — Phase 3A)
+  asset_class: multi_asset
+  tickers:
+    - SPY    # S&P 500 — US large-cap equities
+    - QQQ    # Nasdaq 100 — US technology / growth
+    - IWM    # Russell 2000 — US small-cap equities
+    - XLK    # SPDR Technology
+    - XLF    # SPDR Financials
+    - XLE    # SPDR Energy
+    - XLV    # SPDR Health Care (Phase 3A expansion)
+    - EFA    # iShares MSCI EAFE — developed international
+    - EEM    # iShares MSCI Emerging Markets
+    - TLT    # iShares 20yr Treasury
+    - HYG    # iShares High Yield Corp Bond (Phase 3A expansion)
+    - TIP    # iShares TIPS Bond (Phase 3A expansion)
+    - GLD    # SPDR Gold
+    - DBC    # Invesco DB Commodity (Phase 3A expansion)
+    - VNQ    # Vanguard Real Estate ETF (Phase 3A expansion)
+  frequency: monthly
+  description: >
+    Extended 15-ETF universe used in Phase 3A signal geometry research.
+    Adds XLV, HYG, TIP, DBC, VNQ over core_etfs for broader coverage.
+  source: configs/universes/extended_etfs.yaml
+  notes: Mirrors configs/universes/extended_etfs.yaml.
+
+us_sector_etfs:
+  display_name: US Sector ETFs (SPDR)
+  asset_class: sector_equity
+  tickers:
+    - XLF    # Financials
+    - XLK    # Technology
+    - XLE    # Energy
+    - XLV    # Health Care
+    - XLI    # Industrials
+    - XLY    # Consumer Discretionary
+    - XLP    # Consumer Staples
+  frequency: monthly
+  description: >
+    7-sector SPDR ETF universe. Pure sector rotation basket.
+    All drawn from the same index provider (State Street) for consistency.
+  source: registry
+  notes: >
+    Good for sector-rotation and sector-momentum experiments. Single country
+    (US) removes currency effects. All sectors have history from 1998.
+
+single_asset_spy:
+  display_name: Single Asset — SPY
+  asset_class: equity_index
+  tickers:
+    - SPY
+  frequency: monthly
+  description: >
+    Single-asset SPY universe for ML showcase and baseline experiments.
+    Compatible only with single-asset signals (sign, threshold).
+    Not compatible with cross-sectional or panel signals/labels.
+  source: configs/experiments/canonical_ml_showcase*.yaml
+  notes: >
+    The canonical single-asset ML showcase uses this universe.
+    Do NOT use with top_n, long_short, normalize signals or ranking_target labels.
+
+showcase_20etfs:
+  display_name: Research Showcase — 20-ETF Diversified Multi-Asset Universe
+  asset_class: multi_asset
+  tickers:
+    - SPY    # S&P 500 — US large-cap beta anchor
+    - QQQ    # Nasdaq 100 — technology / growth
+    - IWM    # Russell 2000 — small-cap / risk appetite
+    - EFA    # MSCI EAFE — developed international
+    - EEM    # MSCI Emerging Markets — EM equities
+    - TLT    # 20yr Treasury — long-duration rates / risk-off
+    - IEF    # 7-10yr Treasury — intermediate rates
+    - AGG    # Core US Aggregate Bond — broad investment-grade
+    - HYG    # High Yield Corp Bond — credit risk / spread regime
+    - LQD    # IG Corporate Bond — investment-grade credit
+    - GLD    # Gold — safe-haven / inflation hedge
+    - DBC    # DB Commodity — broad commodity cycle
+    - VNQ    # Real Estate ETF — REIT / real yield / inflation
+    - XLK    # SPDR Technology — growth-sensitive sector
+    - XLF    # SPDR Financials — rate-sensitive sector
+    - XLE    # SPDR Energy — commodity-linked sector
+    - XLV    # SPDR Health Care — defensive sector
+    - XLI    # SPDR Industrials — economically sensitive sector
+    - XLP    # SPDR Consumer Staples — counter-cyclical / defensive
+    - XLU    # SPDR Utilities — rate-sensitive / defensive
+  frequency: daily
+  description: >
+    20-ETF diversified multi-asset universe for the canonical public Research Showcase.
+    Spans US equity size factors, international equities, the full fixed income
+    spectrum (duration + credit), commodities, real assets, and seven SPDR sectors.
+    All tickers have 0% NaN coverage from 2010-01-04 through 2024-12-31.
+  source: configs/universes/showcase_20etfs.yaml
+  notes: >
+    This is the canonical showcase universe. Used in
+    showcase_20etf_ridge_rar5d_top5_rt30_rb5. Do NOT reduce this universe
+    without creating a separate registry entry — the showcase experiment identity
+    depends on the 20-ETF composition.
+
+custom_ticker_list:
+  display_name: Custom Ticker List (User-Defined)
+  asset_class: custom
+  tickers: []
+  frequency: monthly
+  description: >
+    Template for user-defined ticker universes. Replace the empty tickers list
+    with a list of valid equity/ETF tickers. The resolver will classify tickers
+    against asset_classes.yaml to determine compatible signals and labels.
+  source: user
+  notes: >
+    The resolver will check compatibility of custom tickers with requested
+    signals and labels once Phase 2 is implemented. Until then, user is
+    responsible for ensuring cross-sectional signals require multiple tickers.

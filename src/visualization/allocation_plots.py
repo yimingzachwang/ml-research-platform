@@ -115,7 +115,7 @@ def plot_concentration_evolution(
                 label=f"Mean HHI = {mean_hhi:.3f}")
     ax1.set_ylabel(f"HHI ({window}d roll)", fontsize=_t.small_label)
     ax1.legend(frameon=False, fontsize=_t.legend)
-    ax1.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left")
+    ax1.set_title(title, fontweight="semibold", pad=8)
 
     # Panel 2: Effective breadth
     ax2 = axes[1]
@@ -200,8 +200,8 @@ def plot_prediction_dispersion(
     std_roll = cs_std.rolling(window, min_periods=min_periods).mean()
     spread_roll = cs_spread.rolling(window, min_periods=min_periods).mean()
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(FIG_WIDTH_FULL, FIG_HEIGHT_STANDARD * 1.7),
-                                    sharex=True)
+    fig, axes = make_figure(nrows=2, height=FIG_HEIGHT_STANDARD * 2.0, sharex=True)
+    ax1, ax2 = axes
     for ax in (ax1, ax2):
         ax.grid(axis="y", alpha=0.25, linewidth=0.5)
         ax.tick_params(labelsize=_t.tick)
@@ -230,7 +230,7 @@ def plot_prediction_dispersion(
                 label=f"Mean σ = {mean_std:.4f}")
     ax1.set_ylabel(f"CS prediction σ ({window}d roll)", fontsize=_t.small_label)
     ax1.legend(frameon=False, fontsize=_t.legend)
-    ax1.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left")
+    ax1.set_title(title, fontweight="semibold", pad=8)
 
     # Panel 2: top-minus-bottom spread
     ax2.fill_between(spread_roll.index, spread_roll.values,
@@ -305,9 +305,10 @@ def plot_confidence_calibration(
     )
 
     if has_monthly:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(FIG_WIDTH_FULL, FIG_HEIGHT_STANDARD * 1.8))
+        fig, axes = make_figure(nrows=2, height=FIG_HEIGHT_STANDARD * 2.0)
+        ax1, ax2 = axes
     else:
-        fig, ax1 = plt.subplots(1, 1, figsize=(FIG_WIDTH_FULL, FIG_HEIGHT_STANDARD))
+        fig, ax1 = make_figure(height=FIG_HEIGHT_STANDARD)
 
     # ── Panel 1: Bar chart of mean return by quintile ──
     n_q = len(qr)
@@ -324,13 +325,21 @@ def plot_confidence_calibration(
     bars = ax1.bar(x, ret_vals, color=bar_colors, alpha=0.85, width=0.6, edgecolor="white",
                    linewidth=0.5)
 
+    _valid_ret = np.array([v for v in ret_vals if not _math.isnan(v)])
+    _abs_max_ret = max(float(np.max(np.abs(_valid_ret))), 1e-6) if len(_valid_ret) else 1e-6
+    _ann_offset_q = max(0.00003, _abs_max_ret * 0.08)
+    if len(_valid_ret):
+        _lo = float(min(0.0, _valid_ret.min()))
+        _hi = float(max(0.0, _valid_ret.max()))
+        _span = max(_hi - _lo, 1e-6)
+        ax1.set_ylim(_lo - 0.20 * _span, _hi + 0.20 * _span)
     for bar, val in zip(bars, ret_vals, strict=False):
-        sign = 1 if val >= 0 else -1
-        offset = (ax1.get_ylim()[1] - ax1.get_ylim()[0]) * 0.015 if ax1.get_ylim()[0] != ax1.get_ylim()[1] else 0.002
-        ax1.text(bar.get_x() + bar.get_width() / 2, val + sign * abs(offset),
+        # Positive: above bar top. Negative: above zero-axis (not inside bar).
+        y_ann = (val + _ann_offset_q) if val >= 0 else max(_ann_offset_q, abs(val) * 0.05)
+        ax1.text(bar.get_x() + bar.get_width() / 2, y_ann,
                  f"{val:.4f}", ha="center",
-                 va="bottom" if val >= 0 else "top",
-                 fontsize=_t.small_annotation)
+                 va="bottom",
+                 fontsize=_t.small_label)
 
     ax1.axhline(0, color=COLORS["grid"], linewidth=0.8)
     ax1.set_xticks(x)
@@ -360,7 +369,7 @@ def plot_confidence_calibration(
         color=verdict_color,
         fontweight="semibold",
     )
-    ax1.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left")
+    ax1.set_title(title, fontweight="semibold", pad=8)
 
     # ── Panel 2: Cumulative top vs bottom group evolution ──
     if has_monthly:

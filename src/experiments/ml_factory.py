@@ -280,6 +280,13 @@ def build_panel_label_fn(
             return ranking_target(prices[available], h)
         return _panel_label_fn
 
+    if ltype == "risk_adjusted_ranking_target":
+        from src.ml.labels import risk_adjusted_ranking_target
+        def _panel_ra_label_fn(prices: pd.DataFrame, h: int = horizon) -> pd.DataFrame:
+            available = [t for t in tickers if t in prices.columns]
+            return risk_adjusted_ranking_target(prices[available], h)
+        return _panel_ra_label_fn
+
     raise ValueError(f"Unknown panel label type {ltype!r}.")
 
 
@@ -526,6 +533,7 @@ def build_panel_ml_strategy(
     signal_spec: SignalSpec,
     tickers: list[str],
     portfolio_construction: PortfolioConstructionSpec | None = None,
+    rebalance_frequency_days: int = 1,
 ) -> PanelMLStrategy:
     """Assemble a PanelMLStrategy from the four spec objects + universe tickers.
 
@@ -567,6 +575,7 @@ def build_panel_ml_strategy(
         horizon=horizon,
         signal_fn=signal_fn,
         label_name=label_spec.type,
+        rebalance_frequency_days=rebalance_frequency_days,
     )
 
 

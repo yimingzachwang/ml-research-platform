@@ -1,0 +1,112 @@
+# Registry of currently allowed draft config change paths.
+# Source of truth: src/orchestration/config_generation/draft_validator.allowed_change_paths()
+# This file mirrors _VALID_CHANGE_PATHS in draft_validator.py.
+# Do NOT modify draft_validator.py based on this file — this registry is read-only.
+# When draft_validator.py is extended in a future phase, this file must be updated
+# in the same commit to stay in sync.
+# tests/agent/test_registry_consistency.py asserts this file == allowed_change_paths().
+
+- section: execution
+  field: transaction_cost_bps
+  dotted_path: execution.transaction_cost_bps
+  description: Transaction cost assumption in basis points.
+
+- section: features
+  field: entries.add
+  dotted_path: features.entries.add
+  description: Add a feature entry to the features list.
+
+- section: features
+  field: entries.remove
+  dotted_path: features.entries.remove
+  description: Remove a feature entry from the features list.
+
+- section: labels
+  field: params.horizon
+  dotted_path: labels.params.horizon
+  description: Forward-return horizon in periods.
+
+- section: labels
+  field: type
+  dotted_path: labels.type
+  description: Label type (forward_returns, binary_direction, etc.).
+
+- section: model
+  field: params.C
+  dotted_path: model.params.C
+  description: Logistic regression inverse regularisation strength.
+
+- section: model
+  field: params.alpha
+  dotted_path: model.params.alpha
+  description: Ridge / Lasso / ElasticNet regularisation strength.
+
+- section: model
+  field: params.l1_ratio
+  dotted_path: model.params.l1_ratio
+  description: ElasticNet L1/L2 mixing ratio (0.0 = Ridge, 1.0 = Lasso).
+
+- section: model
+  field: params.max_iter
+  dotted_path: model.params.max_iter
+  description: Maximum solver iterations (Lasso, ElasticNet, Logistic).
+
+- section: model
+  field: type
+  dotted_path: model.type
+  description: Model type (LinearRegression, RidgeRegression, etc.).
+
+- section: portfolio_construction
+  field: weighting.prediction_normalization
+  dotted_path: portfolio_construction.weighting.prediction_normalization
+  description: Pre-weighting normalisation of predictions (none, zscore).
+
+- section: portfolio_construction
+  field: weighting.scheme
+  dotted_path: portfolio_construction.weighting.scheme
+  description: Portfolio weighting scheme (equal_weight, confidence_weighted, zscore_softmax).
+
+- section: portfolio_construction
+  field: weighting.temperature
+  dotted_path: portfolio_construction.weighting.temperature
+  description: Softmax temperature for zscore_softmax or confidence_weighted schemes.
+
+- section: signal
+  field: params.n
+  dotted_path: signal.params.n
+  description: Number of assets to select for top_n signal.
+
+- section: signal
+  field: params.n_long
+  dotted_path: signal.params.n_long
+  description: Number of long positions for long_short signal.
+
+- section: signal
+  field: params.n_short
+  dotted_path: signal.params.n_short
+  description: Number of short positions for long_short signal.
+
+- section: signal
+  field: params.threshold
+  dotted_path: signal.params.threshold
+  description: Prediction threshold for threshold signal.
+
+- section: signal
+  field: type
+  dotted_path: signal.type
+  description: Signal type (sign, threshold, top_n, long_short, normalize).
+
+- section: validation
+  field: parameters.gap_days
+  dotted_path: validation.parameters.gap_days
+  description: Gap in days between training end and test start.
+
+- section: validation
+  field: parameters.test_months
+  dotted_path: validation.parameters.test_months
+  description: Test fold length in months.
+
+- section: validation
+  field: parameters.train_months
+  dotted_path: validation.parameters.train_months
+  description: Training window length in months.

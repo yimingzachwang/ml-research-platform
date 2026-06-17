@@ -136,17 +136,19 @@ def plot_weights(
     ax.set_ylim(0, None)
     label_axes(ax, title=title, ylabel="Weight")
     _t = get_typography()
+    _legend_ncol = min(10, len(symbols))
+    _legend_rows = max(1, (len(symbols) + _legend_ncol - 1) // _legend_ncol)
     ax.legend(
-        loc="lower center",
-        bbox_to_anchor=(0.5, 1.10),
-        ncol=len(symbols),
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.08),
+        ncol=_legend_ncol,
         frameon=False,
         fontsize=_t.legend,
         handlelength=1.1,
         columnspacing=0.9,
     )
     fig.tight_layout()
-    fig.subplots_adjust(top=0.84)
+    fig.subplots_adjust(bottom=0.08 + 0.06 * _legend_rows)
     if save_path:
         from src.visualization.utils import save_figure
         save_figure(fig, save_path, close=False)

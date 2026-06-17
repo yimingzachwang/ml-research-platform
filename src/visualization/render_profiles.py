@@ -62,28 +62,28 @@ _REPORT_PROFILE: dict[str, Any] = {
 }
 
 # Frontend profile — browser-inspectable institutional quality
-# Typography targets from spec: titles 18-22pt, labels 15-18pt, ticks 13-16pt,
-# legends 13-15pt.  Layout: +25% canvas, 250 DPI, stronger lines.
+# Typography targets: titles 20pt (RC), axis labels 17pt, ticks 14pt,
+# legends 14pt.  Layout: +40% canvas, 250 DPI, stronger lines.
 _FRONTEND_PROFILE: dict[str, Any] = {
     "rc": {
-        "font.size": 13,
+        "font.size": 14,
         "axes.titlesize": 20,
-        "axes.labelsize": 16,
-        "xtick.labelsize": 13,
-        "ytick.labelsize": 13,
-        "legend.fontsize": 13,
+        "axes.labelsize": 17,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 14,
         "lines.linewidth": 2.0,
         "lines.markersize": 6.0,
         "grid.linewidth": 0.8,
         "savefig.dpi": 250,
     },
-    "figsize_scale": 1.25,
+    "figsize_scale": 1.40,
     "dpi_save": 250,
     "line_width_scale": 1.4,
     "archetype_overrides": {
         # Heatmaps: extra canvas for dense label grids
         ARCHETYPE_HEATMAP: {
-            "figsize_scale": 1.4,
+            "figsize_scale": 1.6,
         },
         # Timelines / multi-line rolling series: legend outside plot area
         ARCHETYPE_TIMELINE: {

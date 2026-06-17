@@ -228,6 +228,8 @@ _LABEL_OVERRIDES: dict[str, str] = {
     "drawdown_dist_252d": "252D Drawdown Distance",
     "vol_compress_21_63": "Vol Compression (21/63D)",
     "beta_60d": "60D Market Beta",
+    "sharpe_mom_63d": "63D Risk-Adj Momentum",
+    "sharpe_mom_126d": "126D Risk-Adj Momentum",
     "sharpe_mom_252d": "252D Risk-Adj Momentum",
 }
 

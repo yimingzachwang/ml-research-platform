@@ -12,6 +12,7 @@ from src.ml.labels import (
     binary_direction_label,
     forward_returns,
     ranking_target,
+    risk_adjusted_ranking_target,
     volatility_target,
 )
 
@@ -218,3 +219,139 @@ def test_ranking_target_same_index_as_input():
     prices = _price_df()
     result = ranking_target(prices, horizon=5)
     assert result.index.equals(prices.index)
+
+
+# ---------------------------------------------------------------------------
+# risk_adjusted_ranking_target
+# ---------------------------------------------------------------------------
+
+
+def test_rart_shape_matches_input_horizon5():
+    prices = _price_df(n=120)
+    result = risk_adjusted_ranking_target(prices, horizon=5)
+    assert result.shape == prices.shape
+
+
+def test_rart_shape_matches_input_horizon10():
+    prices = _price_df(n=120)
+    result = risk_adjusted_ranking_target(prices, horizon=10)
+    assert result.shape == prices.shape
+
+
+def test_rart_shape_matches_input_horizon21():
+    prices = _price_df(n=200)
+    result = risk_adjusted_ranking_target(prices, horizon=21)
+    assert result.shape == prices.shape
+
+
+def test_rart_columns_match_input():
+    prices = _price_df(tickers=["SPY", "QQQ", "IWM"])
+    result = risk_adjusted_ranking_target(prices, horizon=5)
+    assert list(result.columns) == list(prices.columns)
+
+
+def test_rart_trailing_nans_horizon5():
+    horizon = 5
+    prices = _price_df(n=80)
+    result = risk_adjusted_ranking_target(prices, horizon=horizon)
+    assert result.iloc[-horizon:].isna().all().all()
+
+
+def test_rart_trailing_nans_horizon21():
+    horizon = 21
+    prices = _price_df(n=120)
+    result = risk_adjusted_ranking_target(prices, horizon=horizon)
+    assert result.iloc[-horizon:].isna().all().all()
+
+
+def test_rart_same_index_as_input():
+    prices = _price_df()
+    result = risk_adjusted_ranking_target(prices, horizon=5)
+    assert result.index.equals(prices.index)
+
+
+def test_rart_values_in_unit_interval():
+    prices = _price_df(n=200, tickers=["A", "B", "C", "D"])
+    result = risk_adjusted_ranking_target(prices, horizon=10)
+    valid = result.dropna()
+    assert (valid > 0.0).all().all()
+    assert (valid <= 1.0).all().all()
+
+
+def test_rart_monotonic_ranking():
+    # Asset A has consistently high risk-adjusted returns; B has consistently low.
+    # Construct such that A's forward return / realized_vol > B's in every window.
+    horizon = 5
+    n = 60
+    idx = pd.date_range("2020-01-01", periods=n, freq="B")
+    rng = np.random.default_rng(7)
+    # A: steady upward drift, small vol → high Sharpe
+    a_r = 0.003 + rng.normal(0, 0.001, n)
+    # B: negative drift, larger vol → low Sharpe
+    b_r = -0.003 + rng.normal(0, 0.005, n)
+    a_prices = pd.Series(100.0 * np.exp(a_r.cumsum()), index=idx)
+    b_prices = pd.Series(100.0 * np.exp(b_r.cumsum()), index=idx)
+    prices = pd.DataFrame({"A": a_prices, "B": b_prices})
+    result = risk_adjusted_ranking_target(prices, horizon=horizon)
+    valid = result.dropna()
+    # A should rank higher (closer to 1.0) than B in most rows
+    assert (valid["A"] > valid["B"]).mean() > 0.7
+
+
+def test_rart_nan_propagation():
+    # Introduce NaN at a specific cell; that (date, asset) rank should be NaN.
+    prices = _price_df(n=80, tickers=["A", "B", "C"])
+    prices_with_nan = prices.copy()
+    prices_with_nan.iloc[10, 0] = float("nan")  # NaN in asset A at row 10
+    result = risk_adjusted_ranking_target(prices_with_nan, horizon=5)
+    # Row 10 of A contributed to forward-return / vol computation for rows 5-10;
+    # the NaN propagates through pct_change and rolling — row 10 rank for A is NaN.
+    assert pd.isna(result.iloc[10, 0])
+
+
+def test_rart_zero_volatility_excluded_from_ranking():
+    # Build a flat asset (zero vol) alongside two normal assets.
+    n = 60
+    idx = pd.date_range("2020-01-01", periods=n, freq="B")
+    rng = np.random.default_rng(3)
+    flat = pd.Series(100.0, index=idx, name="FLAT")          # zero vol
+    a = pd.Series(100.0 * np.exp(rng.normal(0.001, 0.01, n).cumsum()), index=idx)
+    b = pd.Series(100.0 * np.exp(rng.normal(-0.001, 0.01, n).cumsum()), index=idx)
+    prices = pd.DataFrame({"FLAT": flat, "A": a, "B": b})
+
+    result = risk_adjusted_ranking_target(prices, horizon=5)
+    valid = result.dropna(how="all")
+
+    # FLAT has zero realized vol → its rank is NaN on all valid dates
+    flat_ranks = valid["FLAT"].dropna()
+    assert len(flat_ranks) == 0, "FLAT (zero vol) should have no valid ranks"
+
+    # A and B still produce valid ranks despite FLAT being excluded
+    ab_valid = valid[["A", "B"]].dropna(how="all")
+    assert len(ab_valid) > 0
+    # Two valid assets ranked with pct=True produce {0.5, 1.0} per row → sum = 1.5
+    # (rank(pct=True) among k assets gives k equally-spaced values summing to (k+1)/2)
+    complete_rows = ab_valid.dropna(how="any")
+    row_sums = complete_rows.sum(axis=1)
+    assert (row_sums - 1.5).abs().max() < 1e-10
+    # All values must be within (0, 1]
+    assert (complete_rows > 0.0).all().all()
+    assert (complete_rows <= 1.0).all().all()
+
+
+def test_rart_output_is_independent_dataframe():
+    # Verify the result is a new DataFrame, not a view of the input.
+    prices = _price_df()
+    result = risk_adjusted_ranking_target(prices, horizon=5)
+    result.iloc[0, 0] = 99.9
+    assert prices.iloc[0, 0] != 99.9
+
+
+def test_rart_existing_labels_unchanged():
+    # Ensure ranking_target produces the same result after adding the new function.
+    prices = _price_df(n=100, tickers=["A", "B", "C"])
+    horizon = 10
+    rt = ranking_target(prices, horizon=horizon)
+    fwd = prices.pct_change(horizon).shift(-horizon)
+    expected = fwd.rank(axis=1, pct=True)
+    pd.testing.assert_frame_equal(rt, expected)

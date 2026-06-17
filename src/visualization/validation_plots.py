@@ -273,7 +273,7 @@ def plot_walk_forward_timeline(
         sharpe_col = None
 
     n = len(splits)
-    height = max(3.5, n * 0.7 + 1.2)
+    height = max(4.0, n * 0.85 + 1.5)
     fig, ax = make_figure(height=height, width=FIG_WIDTH_FULL)
     _t = get_typography()
 
@@ -283,20 +283,20 @@ def plot_walk_forward_timeline(
         te_s = mdates.date2num(pd.Timestamp(sr.split.test_start))
         te_e = mdates.date2num(pd.Timestamp(sr.split.test_end))
 
-        ax.barh(i, tr_e - tr_s, left=tr_s, height=0.55,
+        ax.barh(i, tr_e - tr_s, left=tr_s, height=0.60,
                 color=COLORS["neutral"], alpha=0.4,
                 label="Train" if i == 0 else "")
 
         sharpe = float(sharpe_col[i]) if sharpe_col is not None else None
         t_color = COLORS["positive"] if (sharpe is not None and sharpe >= 0) else COLORS["negative"]
-        ax.barh(i, te_e - te_s, left=te_s, height=0.55,
+        ax.barh(i, te_e - te_s, left=te_s, height=0.60,
                 color=t_color, alpha=0.75,
                 label="Test" if i == 0 else "")
 
         if sharpe is not None:
             mid_x = (te_s + te_e) / 2
             ax.text(mid_x, i, f"{sharpe:.2f}",
-                    ha="center", va="center", fontsize=_t.small_annotation,
+                    ha="center", va="center", fontsize=_t.annotation,
                     fontweight="semibold", color="white")
 
     ax.xaxis_date()

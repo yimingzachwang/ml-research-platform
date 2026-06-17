@@ -10,6 +10,49 @@ First message in a new chat:
 Load the Zeto operator manual and reply READY. Do not call any other tools yet.
 ```
 
+## Routing First Rule
+
+**For any natural-language request that is not clearly an existing-experiment
+operation, call `route_research_request` first and follow its `recommended_tool`.**
+
+```
+route_research_request(request="<user's message>")
+```
+
+Then call the tool in `recommended_tool`. Do not call tools in `discouraged_tools`.
+
+### For new preset / model / timeframe requests, do NOT call:
+
+```
+create_research_session         ← wrong for new designs
+build_context_summary           ← wrong for new designs
+run_experiment_review           ← wrong for new designs
+generate_iteration_proposal     ← wrong for new designs
+generate_experiment_draft       ← wrong for new designs
+execute_approved_config         ← wrong for new designs
+```
+
+**Use instead:**
+
+```
+create_validated_draft_from_request(request="<user's message>")
+```
+
+### Example correct flow for "Use the canonical multi-asset ETF preset and test Lasso"
+
+```
+# Step 1 — classify the request
+route_research_request(request="Use the canonical multi-asset ETF preset from 2015 to 2024 and test Lasso instead of Ridge.")
+# → request_type: new_research_design
+# → recommended_tool: create_validated_draft_from_request
+
+# Step 2 — follow the recommended tool
+create_validated_draft_from_request(request="Use the canonical multi-asset ETF preset from 2015 to 2024 and test Lasso instead of Ridge.")
+# → draft preview produced; draft_approved=false; execution_performed=false
+```
+
+Do not call `create_research_session` or `build_context_summary` for this request.
+
 ## Rules
 
 1. Use exact snake_case MCP tool names. Do not camelCase tool names.
@@ -213,6 +256,67 @@ Rules:
 - Comparison evidence summarises **real metric deltas** from artefacts. Never treat it as proof of performance — use `compare_experiment_metrics` for authoritative numbers.
 - Metrics remain authoritative; comparison evidence is a research pointer, not a performance claim.
 
+## Artefact verification and incomplete-metrics stopping rules
+
+After every `execute_approved_config`, call `verify_experiment_artifacts` before
+proceeding to `review_post_run_result`.
+
+```
+verify_experiment_artifacts(experiment_name="canonical_ml_showcase_v13")
+```
+
+Returns `artefact_status: complete` or `incomplete`.
+
+**Hard stopping rules (never override):**
+
+- If `verify_experiment_artifacts` returns `ok=false` (`artefact_status=incomplete`):
+  **stop**. Do not compare, review, index, or invent metrics. Report the failure
+  verbatim to the user.
+- If `get_experiment_metrics` returns `ok=false`: **stop**. Do not compare, review,
+  index, or invent metrics for that experiment.
+- If `compare_experiment_metrics` returns `ok=false` (`incomplete_metrics` or
+  `not_found`): **stop**. Do not inspect evidence or invent conclusions.
+- If any review tool returns a stage containing `blocked_incomplete_metrics`:
+  **stop**. Never invent hypothetical Sharpe, OOS Sharpe, drawdown, or hit-rate
+  values. RAG/memory retrieval cannot substitute for missing authoritative metrics.
+
+The correct Zeto message when artefacts are incomplete:
+
+> "Execution completed, but authoritative metrics are incomplete. The experiment
+> cannot be compared, reviewed, or indexed as evidence. Stop and inspect the
+> artefacts."
+
+## Experiment intelligence (read-only; no LLM)
+
+Four tools for reasoning across accumulated experiments. All use authoritative
+artefact metrics and comparison evidence only — never RAG as proof.
+
+- `rank_experiments` — rank experiment variants by `sharpe_ratio`,
+  `mean_oos_sharpe`, `max_drawdown_pct`, or `robustness_score` (composite).
+  Use to answer "which experiment is best?".
+- `summarise_experiment_family` — aggregate metrics, common failure modes,
+  comparison evidence highlights, and deterministic lessons for all experiments
+  sharing a name prefix. Use to answer "what have we learned?".
+- `check_research_idea_history` — scan comparison evidence by keyword
+  relevance; returns matched changes with metric deltas and a recommendation.
+  Advisory only — warns but does not block. Use before drafting to avoid
+  repeating failed ideas.
+- `propose_research_plan` — deterministic, governed plan (up to `max_steps`
+  steps) derived from failure modes and comparison evidence. Does **not**
+  generate drafts, approve, render, or execute. Each step is advisory only.
+
+Routing:
+- "What have we learned?" / "Summarise family" → `summarise_experiment_family`
+- "Which experiment is best?" / "Rank experiments" → `rank_experiments`
+- "Have we tested this before?" / "Idea history" → `check_research_idea_history`
+- "What should we try next?" / "Propose plan" → `propose_research_plan`
+- To act on a plan step → `generate_config_change_draft` or `generate_parameter_change_draft`
+
+Rules:
+- These tools use authoritative artefact metrics only; never RAG as proof.
+- `propose_research_plan` output does not authorise execution or approval.
+- Rankings and conclusions come from real metrics; never invented.
+
 ## Config introspection (read-only)
 
 Four read-only tools let the agent discover what is changeable before building
@@ -286,6 +390,145 @@ Add a sma_50 feature (sma, window=50) to canonical_ml_showcase_v9.
 What is the Sharpe and OOS Sharpe for canonical_ml_showcase_v9_v2?
 Did canonical_ml_showcase_v9_v2 improve over canonical_ml_showcase_v9?
 ```
+
+## Tool Routing Rules
+
+These rules govern which tool to use depending on the type of request. Following
+them avoids wrong-tool routing loops.
+
+### A. New research-design requests
+
+For a **brand-new** natural-language request involving preset, model, timeframe,
+or feature changes — where no config-backed experiment exists yet — use the
+high-level agent workflow tools:
+
+```
+parse_research_intent                     ← parse NL intent into ResearchSpec
+resolve_research_request                  ← parse + resolve
+create_experiment_plan_from_request       ← parse + resolve + plan
+create_validated_draft_from_request       ← parse + resolve + plan + draft (preferred)
+```
+
+**Preferred direct route** for a validated draft preview from natural language:
+
+```
+create_validated_draft_from_request
+```
+
+Examples of new research-design requests:
+
+```
+Use the canonical multi-asset ETF preset from 2015 to 2024 and test Lasso instead of Ridge.
+Test a different model on the canonical ETF preset.
+Use this timeframe with the canonical preset.
+Create a new research design using a preset.
+Change model/features/validation/timeframe from a registry preset.
+```
+
+### B. Memory-aware "what should we try next?" requests
+
+For requests asking what to try next or requesting a recommendation:
+
+```
+What should we try next?
+What is the next research action?
+Given prior memory, what should we test?
+```
+
+Use:
+
+```
+recommend_next_actions_from_request       ← NL → recommended candidates
+propose_spec_from_recommendation_request  ← NL → candidate → spec proposal
+```
+
+To convert an accepted proposal into a draft preview:
+
+```
+create_validated_draft_from_spec_proposal (with confirm_proposal=true)
+```
+
+### C. Existing experiment review and iteration workflows
+
+Use the older orchestration tools **only** when the user is working with an
+existing config-backed experiment that already has a YAML file in
+`configs/experiments/`.
+
+Examples:
+
+```
+Review canonical_ml_showcase.
+Generate an iteration proposal for canonical_ml_showcase.
+Generate a draft from the existing review/proposal.
+Validate this existing draft.
+Approve this existing draft.
+Render this approved draft.
+Execute this approved config.
+```
+
+Relevant tools:
+
+```
+build_context_summary          ← build LLM context for an existing experiment
+run_experiment_review          ← review existing experiment artefacts
+generate_iteration_proposal    ← propose next step for existing experiment
+generate_experiment_draft      ← draft from existing review/proposal (NOT for new designs)
+validate_experiment_draft
+approve_experiment_draft
+render_draft_to_yaml
+execute_approved_config
+```
+
+### D. Do NOT use generate_experiment_draft for new research-design requests
+
+**`generate_experiment_draft` requires an existing config-backed experiment with
+a prior persisted iteration proposal.** It cannot create a new research design
+from a preset or model change.
+
+If the user's request describes a brand-new research design (e.g. "use the
+canonical ETF preset and test Lasso"), do **not** call `generate_experiment_draft`.
+Use `create_validated_draft_from_request` instead.
+
+If `generate_experiment_draft` returns a routing redirect (`wrong_tool_for_research_design_request`),
+do not retry it — switch to `create_validated_draft_from_request`.
+
+### E. Do NOT invent experiment names
+
+When the user references a preset (e.g. `canonical_multi_asset_etf`) or
+a model/timeframe change, do **not** invent an experiment name like
+`TestLasso2015_2024`. Use the registry/preset workflow through the high-level
+agent tools. Experiment names come from the governed pipeline, not from LLM
+inference.
+
+### F. Retry rule
+
+If a low-level orchestration tool returns:
+- `unknown experiment`
+- `missing config`
+- `no YAML file found`
+- `no IterationProposal found`
+- `wrong_tool_for_research_design_request`
+
+**Do not retry the same tool with the same or a modified experiment name.**
+Re-route to the appropriate high-level agent workflow tool (see A or B above)
+or ask the user for clarification. Repeating a failed low-level call does not
+resolve the underlying wrong-routing issue.
+
+### G. Governance gates remain unchanged
+
+These gates are enforced in code regardless of tool routing:
+
+```
+approve_experiment_draft  requires approval_confirmation="APPROVE"
+render_draft_to_yaml      requires an approved draft
+execute_approved_config   requires confirmation="RUN"
+```
+
+Natural-language wording alone (e.g. "yes", "proceed", "start research cycle")
+must never trigger approval, render, or execution. Only a fresh user message
+containing the exact required confirmation token authorises these actions.
+
+---
 
 ## How to load
 

@@ -1,0 +1,55 @@
+{
+  "ewbh": {
+    "annualized_return": 0.075388,
+    "annualized_volatility": 0.130866,
+    "sharpe_ratio": 0.621152,
+    "max_drawdown": -0.28494,
+    "calmar_ratio": 0.264576,
+    "hit_rate": 0.542564,
+    "sortino_ratio": 0.53941,
+    "total_return": 1.388677,
+    "final_portfolio_value": 2.388677
+  },
+  "ml_backtest": {
+    "annualized_return": 0.11117,
+    "annualized_volatility": 0.173976,
+    "sharpe_ratio": 0.693172,
+    "max_drawdown": -0.329128,
+    "calmar_ratio": 0.337771,
+    "hit_rate": 0.493046,
+    "total_return": 2.537035,
+    "final_portfolio_value": 3.537035,
+    "sortino_ratio": 0.590697
+  },
+  "metadata": {
+    "universe": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "EFA",
+      "EEM",
+      "TLT",
+      "IEF",
+      "AGG",
+      "HYG",
+      "LQD",
+      "GLD",
+      "DBC",
+      "VNQ",
+      "XLK",
+      "XLF",
+      "XLE",
+      "XLV",
+      "XLI",
+      "XLP",
+      "XLU"
+    ],
+    "n_assets": 20,
+    "inception": "2013-01-02",
+    "end_date": "2024-12-31",
+    "n_trading_days": 3020,
+    "ewbh_gross": true,
+    "ml_is_in_sample": true,
+    "risk_free_rate": 0.0
+  }
+}

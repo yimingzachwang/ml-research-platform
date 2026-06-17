@@ -52,6 +52,10 @@ class PanelMLStrategy(Strategy):
             Converts panel prediction scores to portfolio weights.
             Typically top_n_weights from src.ml.signals.
         label_name: Label name stored for provenance; default "ranking_target".
+        rebalance_frequency_days: Generate new weights every N trading days.
+            1 (default) reproduces the original daily-rebalance behaviour.
+            Values > 1 gate signal application to every Nth date in the price
+            index and forward-fill weights between rebalance dates.
     """
 
     def __init__(
@@ -63,6 +67,7 @@ class PanelMLStrategy(Strategy):
         horizon: int,
         signal_fn: Callable[[PredictionSeries], pd.DataFrame],
         label_name: str = "ranking_target",
+        rebalance_frequency_days: int = 1,
     ) -> None:
         self._model = model
         self._tickers = list(tickers)
@@ -71,6 +76,7 @@ class PanelMLStrategy(Strategy):
         self._horizon = horizon
         self._signal_fn = signal_fn
         self._label_name = label_name
+        self._rebalance_frequency_days = max(1, int(rebalance_frequency_days))
         self._is_fitted: bool = False
 
     # ------------------------------------------------------------------
@@ -123,6 +129,12 @@ class PanelMLStrategy(Strategy):
         except Exception:
             return pd.DataFrame(0.0, index=prices.index, columns=self._tickers)
 
+        # When frequency > 1: restrict predictions to rebalance dates before
+        # applying the signal, then forward-fill to daily.
+        if self._rebalance_frequency_days > 1:
+            rebalance_dates = prices.index[::self._rebalance_frequency_days]
+            pred_df = pred_df.reindex(pred_df.index.intersection(rebalance_dates))
+
         panel_preds = PredictionSeries(
             values=pred_df,
             label_name=self._label_name,
@@ -130,7 +142,12 @@ class PanelMLStrategy(Strategy):
         )
         weights = self._signal_fn(panel_preds)
 
-        # Reindex to the full price index; warm-up rows become flat (0)
+        if self._rebalance_frequency_days > 1:
+            from src.portfolio.allocation import resample_weights_to_daily
+            weights = weights.reindex(columns=self._tickers, fill_value=0.0)
+            return resample_weights_to_daily(weights, prices.index)
+
+        # Default: reindex to the full price index; warm-up rows become flat (0)
         return weights.reindex(prices.index, fill_value=0.0).reindex(
             columns=self._tickers, fill_value=0.0
         )
@@ -184,4 +201,5 @@ class PanelMLStrategy(Strategy):
             "tickers": self._tickers,
             "horizon": self._horizon,
             "label_name": self._label_name,
+            "rebalance_frequency_days": self._rebalance_frequency_days,
         }

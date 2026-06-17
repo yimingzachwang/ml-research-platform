@@ -50,6 +50,10 @@ _EXPECTED_TOOLS = {
     "get_experiment_metrics",
     "compare_experiment_metrics",
     "inspect_comparison_evidence",
+    "rank_experiments",
+    "summarise_experiment_family",
+    "check_research_idea_history",
+    "propose_research_plan",
     "list_experiments",
     "create_research_session",
     "get_session_summary",
@@ -63,8 +67,30 @@ _EXPECTED_TOOLS = {
     "validate_experiment_draft",
     "approve_experiment_draft",
     "render_draft_to_yaml",
+    "verify_experiment_artifacts",
     "execute_approved_config",
     "review_post_run_result",
+    # Phase 3C — agent workflow tools
+    "list_research_agent_options",
+    "resolve_research_spec",
+    "create_experiment_plan_from_spec",
+    "create_validated_draft_from_spec",
+    # Phase 4A — intent parser
+    "parse_research_intent",
+    # Phase 4B — natural-language workflow
+    "resolve_research_request",
+    "create_experiment_plan_from_request",
+    "create_validated_draft_from_request",
+    # Phase 5C — next-action recommendation
+    "recommend_next_actions",
+    "recommend_next_actions_from_request",
+    # Phase 5E — candidate-to-spec proposals
+    "propose_spec_from_next_action",
+    "propose_spec_from_recommendation_request",
+    # Phase 5F — proposal-to-draft preview
+    "create_validated_draft_from_spec_proposal",
+    # Phase 5G.2 — request router
+    "route_research_request",
 }
 
 
@@ -313,6 +339,32 @@ def _stub_state(**overrides) -> dict:
     return state
 
 
+def _stub_workflow_result(status: str = "resolved") -> dict:
+    """Stub WorkflowResult.to_dict() for Phase-3C tool tests."""
+    return {
+        "status": status,
+        "summary": f"stub {status}",
+        "resolution": {"status": status, "resolved_spec": {}, "missing_fields": []},
+        "plan": {"plan_id": "plan_x", "name": "stub plan", "experiment_type": "preset_baseline"},
+        "draft": {"draft_id": "d1", "proposed_name": "exp_v2", "changes": []},
+        "warnings": [],
+        "errors": [],
+        "missing_fields": [],
+        "defaulted_fields": {},
+        "assumptions": [],
+        "requires_confirmation": False,
+        "unsupported_fields": [],
+        "hard_unsupported_fields": [],
+        "approval_required": True,
+        "execution_performed": False,
+        "draft_approved": False,
+        "mapped_changes": [],
+        "validation_errors": [],
+        "proposed_name": "exp_v2",
+        "base_experiment": "canonical_ml_multi_asset",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Server / tool registration
 # ---------------------------------------------------------------------------
@@ -337,7 +389,7 @@ def test_no_all_in_one_or_loop_tool_exists():
     names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
     # Granular tools only — nothing that runs the whole flow silently.
     # (check_research_workflow_state is a read-only preflight, not a run loop.)
-    assert len(names) == 31
+    assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
     for forbidden in ("auto", "loop", "full", "pipeline", "run_all", "orchestrate", "everything"):
         assert not any(forbidden in n.lower() for n in names), f"loop-like tool name: {forbidden}"
 
@@ -366,9 +418,12 @@ def test_operator_manual_is_compact():
     # The manual is a one-time session-start reference (not a per-step workflow
     # output), so it carries a slightly larger ceiling than per-step tools as the
     # toolset and governance rules grow. Per-step outputs stay capped at 4000.
-    # 5 new config-introspection/change tools added routing rules; budget raised
-    # from 4800 to 5600.
-    assert len(json.dumps(zeto.get_zeto_operator_manual())) < 5600
+    # 5 new config-introspection/change tools added routing rules: budget raised
+    # from 4800→5600. 4 new experiment-intelligence tools added more rules:
+    # budget raised to 6400. verify_experiment_artifacts + 4 incomplete-metrics
+    # stopping rules: budget raised to 7200. 7 ROUTING A–G tool-routing rules
+    # added (Phase 5G.1): budget raised to 9000.
+    assert len(json.dumps(zeto.get_zeto_operator_manual())) < 9000
 
 
 def test_operator_manual_includes_key_rules():
@@ -868,6 +923,7 @@ def _call_every_tool() -> dict[str, dict]:
         p("generate_iteration_proposal", return_value=_stub_proposal())
         p("generate_experiment_draft", return_value=_stub_draft(False))
         p("load_experiment_draft", return_value=_stub_draft(True))
+        stack.enter_context(patch("src.mcp.zeto_server._experiment_config_exists", return_value=True))
         p("validate_experiment_draft", return_value=DraftValidationResult(is_valid=True, errors=[]))
         p("approve_experiment_draft", return_value=_stub_draft(True))
         p("render_draft_to_yaml", return_value="name: exp_a_v2\n# hash")
@@ -884,8 +940,278 @@ def _call_every_tool() -> dict[str, dict]:
         p("generate_parameter_change_draft", return_value=_stub_param_change_result())
         p("get_experiment_metrics", return_value=_stub_metrics_result())
         p("compare_experiment_metrics", return_value=_stub_compare_result())
+        # Phase-3C agent workflow mocks
+        _aw = "src.mcp.zeto_server._agent_workflow"
+        _lr = "src.mcp.zeto_server._load_registry"
+        stack.enter_context(patch(f"{_aw}.run_resolve_spec", return_value=SimpleNamespace(**_stub_workflow_result("resolved"), to_dict=lambda: _stub_workflow_result("resolved"))))
+        stack.enter_context(patch(f"{_aw}.run_plan_from_spec", return_value=SimpleNamespace(**_stub_workflow_result("planned"), to_dict=lambda: _stub_workflow_result("planned"))))
+        stack.enter_context(patch(f"{_aw}.run_draft_from_spec", return_value=SimpleNamespace(**_stub_workflow_result("draft_created"), to_dict=lambda: _stub_workflow_result("draft_created"))))
+        stack.enter_context(patch(f"{_lr}", return_value=SimpleNamespace(
+            model_names=lambda: frozenset({"RidgeRegression"}),
+            feature_names=lambda: frozenset({"mom_20"}),
+            signal_names=lambda: frozenset({"top_n"}),
+            label_names=lambda: frozenset({"ranking_target"}),
+            universe_names=lambda: frozenset({"canonical_multi_asset_etfs"}),
+            asset_class_names=lambda: frozenset({"multi_asset"}),
+            validation_names=lambda: frozenset({"rolling"}),
+            weighting_scheme_names=lambda: frozenset({"equal_weight"}),
+            prediction_normalization_names=lambda: frozenset({"none"}),
+            diagnostic_names=lambda: frozenset({"sharpe_ratio"}),
+            preset_names=lambda: frozenset({"canonical_multi_asset_etf"}),
+            changeable_paths=lambda: frozenset({"model.type"}),
+        )))
+        # Phase-4A intent parser mock
+        _stub_intent = SimpleNamespace(
+            status="parsed",
+            summary="stub parsed",
+            research_spec=SimpleNamespace(to_dict=lambda: {}),
+            raw_text="stub",
+            raw_model_output=None,
+            extracted_fields={"model": "RidgeRegression"},
+            unrecognised_terms=[],
+            registry_warnings=[],
+            missing_after_parse=["end_date"],
+            confidence=0.9,
+            errors=[],
+            warnings=[],
+            no_plan_created=True,
+            no_draft_created=True,
+            no_execution_performed=True,
+        )
+        _stub_intent.to_dict = lambda: {
+            "status": "parsed", "research_spec": {},
+            "raw_text": "stub", "raw_model_output": None,
+            "extracted_fields": {"model": "RidgeRegression"},
+            "unrecognised_terms": [], "registry_warnings": [],
+            "missing_after_parse": ["end_date"],
+            "confidence": 0.9, "errors": [], "warnings": [],
+            "summary": "stub parsed",
+            "no_plan_created": True, "no_draft_created": True,
+            "no_execution_performed": True,
+        }
+        stack.enter_context(patch(
+            "src.mcp.zeto_server._parse_research_intent",
+            return_value=_stub_intent,
+        ))
+        # Phase-4B NL workflow mocks
+        _stub_nl_wf_resolved = SimpleNamespace(**_stub_workflow_result("resolved"),
+            parse={"status": "parsed", "extracted_fields": {"preset": "canonical_multi_asset_etf"},
+                   "unrecognised_terms": [], "registry_warnings": [], "missing_after_parse": [],
+                   "confidence": 0.9, "warnings": [], "raw_model_output": None, "summary": "stub"},
+            saved_draft=None,
+        )
+        _stub_nl_wf_resolved.to_dict = lambda: {
+            **_stub_workflow_result("resolved"),
+            "parse": _stub_nl_wf_resolved.parse,
+            "saved_draft": None,
+            "governance": {"approval_required": True, "execution_performed": False, "draft_approved": False},
+        }
+        _stub_nl_wf_planned = SimpleNamespace(**_stub_workflow_result("planned"),
+            parse={"status": "parsed", "extracted_fields": {}, "unrecognised_terms": [],
+                   "registry_warnings": [], "missing_after_parse": [],
+                   "confidence": 0.8, "warnings": [], "raw_model_output": None, "summary": "stub"},
+            saved_draft=None,
+        )
+        _stub_nl_wf_planned.to_dict = lambda: {
+            **_stub_workflow_result("planned"),
+            "parse": _stub_nl_wf_planned.parse,
+            "saved_draft": None,
+            "governance": {"approval_required": True, "execution_performed": False, "draft_approved": False},
+        }
+        _stub_nl_wf_draft = SimpleNamespace(**_stub_workflow_result("draft_created"),
+            parse={"status": "parsed", "extracted_fields": {}, "unrecognised_terms": [],
+                   "registry_warnings": [], "missing_after_parse": [],
+                   "confidence": 0.85, "warnings": [], "raw_model_output": None, "summary": "stub"},
+            saved_draft=None,
+        )
+        _stub_nl_wf_draft.to_dict = lambda: {
+            **_stub_workflow_result("draft_created"),
+            "parse": _stub_nl_wf_draft.parse,
+            "saved_draft": None,
+            "governance": {"approval_required": True, "execution_performed": False, "draft_approved": False},
+        }
+        _nlw_mod = "src.mcp.zeto_server._nlw"
+        stack.enter_context(patch(f"{_nlw_mod}.run_resolve_from_request", return_value=_stub_nl_wf_resolved))
+        stack.enter_context(patch(f"{_nlw_mod}.run_plan_from_request", return_value=_stub_nl_wf_planned))
+        stack.enter_context(patch(f"{_nlw_mod}.run_draft_from_request", return_value=_stub_nl_wf_draft))
+        # Phase-5C next-action workflow mocks
+        _naw_cands = [
+            {
+                "action_id": "cand_0", "title": "Feature Ablation", "action_type": "feature_ablation",
+                "priority": "high", "description": "ablate low-IC features",
+                "rationale": "high turnover", "requires_user_confirmation": True,
+                "creates_draft": False, "executes_experiment": False, "main_risks": [],
+            }
+        ]
+        _naw_na = {
+            "status": "recommended", "objective": None, "candidates": _naw_cands,
+            "top_candidate": _naw_cands[0], "evidence_summary": "1 item",
+            "rejected_directions": [], "recommended_cautions": [], "warnings": [], "errors": [],
+            "summary": "1 candidate.", "approval_required": True,
+            "execution_performed": False, "draft_created": False,
+        }
+        _naw_gov = {
+            "approval_required": True, "execution_performed": False,
+            "draft_approved": False, "draft_created": False,
+        }
+        _stub_naw_base = {
+            **_stub_workflow_result("recommended"),
+            "next_actions": _naw_na,
+            "memory_context": {"total_items": 1, "is_empty": False, "failure_mode_summary": {}},
+            "governance": _naw_gov,
+        }
+        _stub_naw_result = SimpleNamespace(
+            status="recommended", summary="1 candidate.", missing_fields=[], warnings=[],
+            errors=[], next_actions=_naw_na, memory_context_summary={"total_items": 1},
+            approval_required=True, execution_performed=False, draft_approved=False, parse=None,
+        )
+        _stub_naw_result.to_dict = lambda: _stub_naw_base
+        _naw_mod = "src.mcp.zeto_server._naw"
+        stack.enter_context(patch(f"{_naw_mod}.run_recommend_next_actions", return_value=_stub_naw_result))
+        stack.enter_context(patch(f"{_naw_mod}.run_recommend_next_actions_from_request", return_value=_stub_naw_result))
+        # Phase-5E spec proposal workflow mocks
+        _spw_cand = SimpleNamespace(
+            action_id="act_model_lasso",
+            action_type="model_comparison",
+            title="Test Lasso",
+            description="Compare LassoRegression",
+            rationale="test",
+            supporting_evidence_ids=["ev1"],
+            suggested_spec_changes={"model": "LassoRegression"},
+            main_risks=[],
+            creates_draft=False,
+            executes_experiment=False,
+            requires_user_confirmation=True,
+        )
+        _spw_cand.to_dict = lambda: {
+            "action_id": "act_model_lasso",
+            "action_type": "model_comparison",
+            "title": "Test Lasso",
+            "description": "Compare LassoRegression",
+            "rationale": "test",
+            "supporting_evidence_ids": ["ev1"],
+            "suggested_spec_changes": {"model": "LassoRegression"},
+            "main_risks": [],
+            "creates_draft": False,
+            "executes_experiment": False,
+            "requires_user_confirmation": True,
+        }
+        _spw_sp_compact = {
+            "status": "proposal_created",
+            "summary": "Spec proposal [proposal_created]. No draft created. No execution. Approval required.",
+            "proposal": {
+                "proposal_id": "p5e_stub",
+                "source_candidate_id": "act_model_lasso",
+                "source_action_type": "model_comparison",
+                "proposed_spec": {"preset": "canonical_multi_asset_etf", "model": "LassoRegression"},
+                "proposed_changes": {"model": "LassoRegression"},
+                "unchanged_fields": {"preset": "canonical_multi_asset_etf"},
+                "unsupported_changes": [],
+                "supporting_evidence_ids": ["ev1"],
+                "resolution_status": "resolved",
+                "rationale": "test",
+                "requires_user_confirmation": True,
+                "creates_draft": False,
+                "executes_experiment": False,
+                "approval_required": True,
+                "base_spec": None,
+            },
+            "proposed_spec": {"preset": "canonical_multi_asset_etf", "model": "LassoRegression"},
+            "proposed_changes": {"model": "LassoRegression"},
+            "unchanged_fields": {"preset": "canonical_multi_asset_etf"},
+            "unsupported_changes": [],
+            "supporting_evidence_ids": ["ev1"],
+            "resolution_status": "resolved",
+            "rationale": "test",
+            "warnings": [],
+            "errors": [],
+            "governance": {
+                "approval_required": True,
+                "requires_user_confirmation": True,
+                "draft_created": False,
+                "execution_performed": False,
+                "draft_approved": False,
+            },
+        }
+        _spw_gov = {
+            "approval_required": True,
+            "requires_user_confirmation": True,
+            "execution_performed": False,
+            "draft_approved": False,
+            "draft_created": False,
+        }
+        _spw_base_dict = {
+            **_stub_workflow_result("proposal_created"),
+            "parse": None,
+            "saved_draft": None,
+            "next_actions": None,
+            "memory_context": None,
+            "spec_proposal": _spw_sp_compact,
+            "selected_candidate": _spw_cand.to_dict(),
+            "governance": _spw_gov,
+        }
+        _stub_spw_result = SimpleNamespace(
+            status="proposal_created",
+            summary="Spec proposal [proposal_created]. No draft created. No execution. Approval required.",
+            missing_fields=[], warnings=[], errors=[],
+            spec_proposal=_spw_sp_compact, selected_candidate=_spw_cand.to_dict(),
+            next_actions=None, memory_context_summary=None, resolution=None, parse=None,
+            approval_required=True, execution_performed=False, draft_approved=False,
+        )
+        _stub_spw_result.to_dict = lambda: _spw_base_dict
+        _spw_mod = "src.mcp.zeto_server._spw"
+        stack.enter_context(patch(
+            f"{_spw_mod}._parse_candidate_from_dict",
+            return_value=(_spw_cand, None),
+        ))
+        stack.enter_context(patch(
+            f"{_spw_mod}.run_propose_spec_from_candidate",
+            return_value=_stub_spw_result,
+        ))
+        stack.enter_context(patch(
+            f"{_spw_mod}.run_propose_spec_from_request",
+            return_value=_stub_spw_result,
+        ))
+        # Phase-5F proposal-to-draft workflow mocks
+        _ptdw_gov = {
+            "approval_required": True,
+            "requires_user_confirmation": True,
+            "execution_performed": False,
+            "draft_approved": False,
+            "draft_created": True,
+            "draft_saved": False,
+        }
+        _ptdw_base_dict = {
+            **_stub_workflow_result("draft_created"),
+            "parse": None,
+            "saved_draft": None,
+            "next_actions": None,
+            "memory_context": None,
+            "spec_proposal": _spw_sp_compact,
+            "selected_candidate": None,
+            "governance": _ptdw_gov,
+        }
+        _stub_ptdw_result = SimpleNamespace(
+            status="draft_created",
+            summary="Draft [draft_created] from proposal.",
+            missing_fields=[], warnings=[], errors=[],
+            spec_proposal=_spw_sp_compact, selected_candidate=None,
+            next_actions=None, memory_context_summary=None, resolution=None, parse=None,
+            approval_required=True, execution_performed=False, draft_approved=False,
+            draft_saved=False, draft={"draft_id": "d_stub"}, saved_draft=None,
+            proposed_name="exp_v2", unsupported_fields=[], hard_unsupported_fields=[],
+        )
+        _stub_ptdw_result.to_dict = lambda: _ptdw_base_dict
+        _ptdw_mod = "src.mcp.zeto_server._ptdw"
+        stack.enter_context(patch(
+            f"{_ptdw_mod}.run_draft_from_spec_proposal",
+            return_value=_stub_ptdw_result,
+        ))
         return {
             "get_zeto_operator_manual": zeto.get_zeto_operator_manual(),
+            "route_research_request": zeto.route_research_request(
+                "Use the canonical multi-asset ETF preset and test Lasso"
+            ),
             "get_research_memory_status": zeto.get_research_memory_status(),
             "index_research_memory": zeto.index_research_memory(),
             "retrieve_research_memory": zeto.retrieve_research_memory(
@@ -923,6 +1249,82 @@ def _call_every_tool() -> dict[str, dict]:
                 "configs/experiments/exp_a_v2.yaml", confirmation="RUN"
             ),
             "review_post_run_result": zeto.review_post_run_result("exp_a"),
+            # Phase-3C agent workflow tools
+            "list_research_agent_options": zeto._mcp_list_research_agent_options(),
+            "resolve_research_spec": zeto._mcp_resolve_research_spec('{"preset": "canonical_multi_asset_etf"}'),
+            "create_experiment_plan_from_spec": zeto._mcp_create_experiment_plan_from_spec('{"preset": "canonical_multi_asset_etf"}'),
+            "create_validated_draft_from_spec": zeto._mcp_create_validated_draft_from_spec('{"preset": "canonical_multi_asset_etf"}'),
+            # Phase-4A intent parser tool
+            "parse_research_intent": zeto._mcp_parse_research_intent("canonical ETF"),
+            # Phase-4B NL workflow tools
+            "resolve_research_request": zeto._mcp_resolve_research_request("canonical ETF 2024"),
+            "create_experiment_plan_from_request": zeto._mcp_create_experiment_plan_from_request("canonical ETF 2024"),
+            "create_validated_draft_from_request": zeto._mcp_create_validated_draft_from_request("canonical ETF 2024"),
+            # Phase-5C next-action tools
+            "recommend_next_actions": zeto._mcp_recommend_next_actions(
+                spec='{"preset": "canonical_multi_asset_etf", "end_date": "2024-12-31"}'
+            ),
+            "recommend_next_actions_from_request": zeto._mcp_recommend_next_actions_from_request(
+                "What should I try next for canonical ETF?"
+            ),
+            # Phase-5E spec proposal tools
+            "propose_spec_from_next_action": zeto._mcp_propose_spec_from_next_action(
+                candidate=json.dumps({
+                    "action_id": "act_model_lasso",
+                    "action_type": "model_comparison",
+                    "title": "Test Lasso regularisation",
+                    "description": "Compare LassoRegression against the baseline.",
+                    "rationale": "Prior evidence suggests regularisation sensitivity.",
+                    "supporting_evidence_ids": ["ev1"],
+                    "suggested_spec_changes": {"model": "LassoRegression"},
+                    "main_risks": ["overfitting"],
+                    "failure_modes_to_monitor": ["high_split_variance"],
+                    "priority": "high",
+                    "confidence": "medium",
+                }),
+                base_spec=json.dumps({
+                    "preset": "canonical_multi_asset_etf",
+                    "start_date": "2015-01-01",
+                    "end_date": "2024-12-31",
+                }),
+                mode="recommended",
+            ),
+            "propose_spec_from_recommendation_request": zeto._mcp_propose_spec_from_recommendation_request(
+                request="Use canonical multi-asset ETF preset from 2015 to 2024. What should we try next?",
+                candidate_index=0,
+                provider="stub",
+                mode="recommended",
+                max_candidates=3,
+                max_memory_results=8,
+            ),
+            # Phase-5F proposal-to-draft tool
+            "create_validated_draft_from_spec_proposal": zeto._mcp_create_validated_draft_from_spec_proposal(
+                proposal=json.dumps({
+                    "proposal_id": "p5f_stub",
+                    "source_candidate_id": "act_model_lasso",
+                    "source_action_type": "model_comparison",
+                    "base_spec": {"preset": "canonical_multi_asset_etf", "end_date": "2024-12-31"},
+                    "proposed_spec": {
+                        "preset": "canonical_multi_asset_etf",
+                        "end_date": "2024-12-31",
+                        "model": "LassoRegression",
+                    },
+                    "proposed_changes": {"model": "LassoRegression"},
+                    "unchanged_fields": {"preset": "canonical_multi_asset_etf", "end_date": "2024-12-31"},
+                    "rationale": "stub",
+                    "supporting_evidence_ids": ["ev1"],
+                    "warnings": [],
+                    "unsupported_changes": [],
+                    "resolution_status": "resolved",
+                    "resolution_summary": "resolved",
+                    "requires_user_confirmation": True,
+                    "creates_draft": False,
+                    "executes_experiment": False,
+                    "approval_required": True,
+                }),
+                confirm_proposal=True,
+                mode="recommended",
+            ),
         }
 
 
@@ -1104,6 +1506,7 @@ def test_build_context_summary_display_shows_failure_modes_and_validation():
     with (
         patch(f"{_MOD}.build_llm_context", return_value=_stub_ctx()),
         patch(f"{_MOD}.compute_context_hash", return_value="h" * 64),
+        patch("src.mcp.zeto_server._experiment_config_exists", return_value=True),
     ):
         out = zeto.build_context_summary("exp_a")
     assert out["stage"] == "context_built"
@@ -1354,7 +1757,7 @@ def test_render_still_refuses_unapproved_draft_after_gate():
 
 def test_approval_gate_adds_no_new_tool_or_loop():
     names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
-    assert len(names) == 31
+    assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
     for forbidden in ("auto", "loop", "full", "pipeline", "run_all", "orchestrate", "everything"):
         assert not any(forbidden in n.lower() for n in names)
 
@@ -1378,11 +1781,12 @@ def test_execute_success_suggests_post_run_review():
             "configs/experiments/exp_a_v2.yaml", confirmation="RUN"
         )
     assert out["ok"] is True
-    assert out["next_suggested_action"] == "review_post_run_result"
+    assert out["next_suggested_action"] == "verify_experiment_artifacts"
 
 
 def test_post_run_review_suggests_session_summary():
     with (
+        patch(f"{_MOD}.get_experiment_metrics", return_value=_stub_metrics_result()),
         patch(f"{_MOD}.run_llm_review", return_value=_stub_review()),
         patch(f"{_MOD}.build_llm_context", return_value=_stub_ctx()),
         patch(f"{_MOD}.compute_context_hash", return_value="h" * 64),
@@ -1394,7 +1798,10 @@ def test_post_run_review_suggests_session_summary():
 def test_post_run_review_failure_stops_no_autoretry():
     # A failing/timed-out post-run review returns a clean ok=false envelope and
     # stops — it never auto-retries the review tool.
-    with patch(f"{_MOD}.run_llm_review", side_effect=TimeoutError("LM Studio timed out")):
+    with (
+        patch(f"{_MOD}.get_experiment_metrics", return_value=_stub_metrics_result()),
+        patch(f"{_MOD}.run_llm_review", side_effect=TimeoutError("LM Studio timed out")),
+    ):
         out = zeto.review_post_run_result("exp_a_v2")
     assert _CONTRACT_KEYS.issubset(out)
     assert out["ok"] is False
@@ -1433,7 +1840,7 @@ def test_governance_changes_add_no_new_tool_or_loop():
     # The fix is to next_suggested_action / displays only — no tool was added,
     # and nothing loop-like was introduced.
     names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
-    assert len(names) == 31
+    assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
     for forbidden in ("auto", "loop", "full", "pipeline", "run_all", "orchestrate"):
         assert not any(forbidden in n.lower() for n in names)
 
@@ -1469,6 +1876,7 @@ def test_render_display_states_execution_not_occurred():
 
 def test_review_post_run_display_shows_hash_flags_sections():
     with (
+        patch(f"{_MOD}.get_experiment_metrics", return_value=_stub_metrics_result()),
         patch(f"{_MOD}.run_llm_review", return_value=_stub_review()),
         patch(f"{_MOD}.build_llm_context", return_value=_stub_ctx()),
         patch(f"{_MOD}.compute_context_hash", return_value="abc12345" + "0" * 56),
@@ -1593,10 +2001,15 @@ def test_generate_draft_stub_returns_valid_envelope_with_diff(tmp_path):
 
 
 def test_generate_draft_failure_returns_clean_envelope():
-    # A failing draft generation (e.g. missing proposal) must NOT raise or return
-    # a partial/invented config — it must surface a clean ok=False envelope so the
-    # model reports the failure and stops.
-    with patch(f"{_MOD}.generate_experiment_draft", side_effect=FileNotFoundError("no proposal")):
+    # A failing draft generation (e.g. missing proposal) for an *existing* config-backed
+    # experiment must NOT raise or return a partial/invented config — it must surface a
+    # clean ok=False envelope so the model reports the failure and stops.
+    # Patch _experiment_config_exists=True to simulate the "exists but no proposal" case
+    # (exp_a has no real YAML on disk, so without the patch the routing guard would fire).
+    with (
+        patch(f"{_MOD}.generate_experiment_draft", side_effect=FileNotFoundError("no proposal")),
+        patch("src.mcp.zeto_server._experiment_config_exists", return_value=True),
+    ):
         out = zeto.generate_experiment_draft("exp_a", provider="stub")
     assert _CONTRACT_KEYS.issubset(out)
     assert out["ok"] is False
@@ -1777,11 +2190,14 @@ def test_all_tool_payloads_are_small():
     # Generous per-tool ceilings; the principle is "small for a 32k window".
     # The operator manual is a one-time session-start reference, not a per-step
     # output, so it carries a slightly larger ceiling. Raised from 4800→5600
-    # when 5 config-introspection/change tools added routing rules.
+    # when 5 config-introspection/change tools added routing rules; raised to
+    # 6400 when 4 experiment-intelligence tools added more routing rules;
+    # raised to 7200 when incomplete-metrics artefact verification rules added;
+    # raised to 9000 when 7 ROUTING A–G tool-routing rules added (Phase 5G.1).
     bigger = {
         "execute_approved_config": 6000,
         "get_session_summary": 6000,
-        "get_zeto_operator_manual": 5600,
+        "get_zeto_operator_manual": 9000,
     }
     for name, out in _call_every_tool().items():
         size = len(json.dumps(out))
@@ -1801,6 +2217,7 @@ def test_context_summary_drops_full_dicts_and_arrays():
     with (
         patch(f"{_MOD}.build_llm_context", return_value=ctx),
         patch(f"{_MOD}.compute_context_hash", return_value="h" * 64),
+        patch("src.mcp.zeto_server._experiment_config_exists", return_value=True),
     ):
         out = zeto.build_context_summary("exp_a")
     blob = json.dumps(out)
@@ -1819,9 +2236,11 @@ def test_review_excludes_full_section_bodies():
         flags=[],
     )
     with (
+        patch(f"{_MOD}.get_experiment_metrics", return_value=_stub_metrics_result()),
         patch(f"{_MOD}.run_llm_review", return_value=review),
         patch(f"{_MOD}.build_llm_context", return_value=_stub_ctx()),
         patch(f"{_MOD}.compute_context_hash", return_value="h" * 64),
+        patch("src.mcp.zeto_server._experiment_config_exists", return_value=True),
     ):
         out = zeto.run_experiment_review("exp_a")
     blob = json.dumps(out)
@@ -1841,7 +2260,10 @@ def test_proposal_excludes_full_bodies():
         confidence="medium",
         context_hash="h" * 64,
     )
-    with patch(f"{_MOD}.generate_iteration_proposal", return_value=proposal):
+    with (
+        patch(f"{_MOD}.generate_iteration_proposal", return_value=proposal),
+        patch("src.mcp.zeto_server._experiment_config_exists", return_value=True),
+    ):
         out = zeto.generate_iteration_proposal("exp_a")
     blob = json.dumps(out)
     assert "R" * 5000 not in blob
@@ -1856,6 +2278,7 @@ def test_context_hash_preserved_full_in_data_short_in_display():
     with (
         patch(f"{_MOD}.build_llm_context", return_value=_stub_ctx()),
         patch(f"{_MOD}.compute_context_hash", return_value=full_hash),
+        patch("src.mcp.zeto_server._experiment_config_exists", return_value=True),
     ):
         out = zeto.build_context_summary("exp_a")
     assert out["data"]["context_hash"] == full_hash          # full provenance kept
@@ -1888,13 +2311,37 @@ def test_module_has_no_forbidden_imports_or_calls():
         assert forbidden not in src, f"zeto_server must not use {forbidden!r}"
 
 
-def test_module_imports_only_research_api_surface():
+def test_module_imports_only_approved_surfaces():
+    """zeto_server.py may only import from approved src.* modules.
+
+    Approved surfaces (Phase 4B update):
+      - src.orchestration.api.research_api          (original governed API)
+      - src.orchestration.session.session_schema    (session event types)
+      - src.agent.workflow.research_workflow        (Phase-3C deterministic workflow)
+      - src.agent.workflow.draft_persistence        (Phase-3D persistence bridge)
+      - src.agent.registry.registry_loader          (Phase-3C registry options tool)
+      - src.agent.intent.intent_parser              (Phase-4A NL intent parser)
+      - src.agent.workflow.natural_language_workflow (Phase-4B NL workflow façade)
+    """
     import_lines = [
         line
         for line in inspect.getsource(zeto).splitlines()
         if line.startswith("from src.") or line.startswith("import src.")
     ]
+    _APPROVED = (
+        "research_api",
+        "session_schema",
+        "research_workflow",
+        "draft_persistence",
+        "registry_loader",
+        "intent_parser",
+        "natural_language_workflow",
+        "next_action_workflow",
+        "spec_proposal_workflow",
+        "proposal_to_draft_workflow",
+        "llm_settings",
+    )
     for line in import_lines:
-        assert (
-            "research_api" in line or "session_schema" in line
-        ), f"unexpected orchestration import: {line}"
+        assert any(token in line for token in _APPROVED), (
+            f"unexpected import in zeto_server.py: {line}"
+        )

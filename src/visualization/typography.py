@@ -98,17 +98,18 @@ _TYPOGRAPHY: dict[str, TypographyScale] = {
         small_annotation=7.0,
     ),
     # Frontend profile — browser-inspectable institutional quality.
-    # All values scaled ~×1.4 from report to match the RC-level scaling
-    # already applied (axes.titlesize 11→20, legend.fontsize 9→13).
+    # Values target: panel titles/axis labels 14-16pt, ticks 13pt,
+    # legends 13pt, bar annotations 12pt.  small_label raised to 15pt
+    # so set_title(fontsize=_t.small_label) produces readable standalone titles.
     "frontend": TypographyScale(
-        annotation=12.0,
-        legend=12.0,
-        tick=12.0,
-        colorbar=10.5,
+        annotation=13.5,
+        legend=13.0,
+        tick=13.0,
+        colorbar=12.0,
         heatmap_cell=12.0,
-        figure_text=14.0,
-        small_label=11.0,
-        small_annotation=10.0,
+        figure_text=15.0,
+        small_label=15.0,
+        small_annotation=12.0,
     ),
 }
 

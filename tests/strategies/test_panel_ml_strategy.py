@@ -210,3 +210,142 @@ class TestPanelMLStrategyWalkForward:
 
         for split_result in wf.splits:
             assert not split_result.weights.empty
+
+
+# ---------------------------------------------------------------------------
+# Rebalance frequency — Phase B (D3)
+# ---------------------------------------------------------------------------
+
+
+def _make_strategy_with_freq(
+    tickers: list[str], top_n: int = 2, horizon: int = 5, rebalance_frequency_days: int = 1
+) -> PanelMLStrategy:
+    from src.ml.models.linear import RidgeRegressionModel
+    model = RidgeRegressionModel(alpha=1.0)
+    return PanelMLStrategy(
+        model=model,
+        tickers=tickers,
+        feature_fn_builder=_momentum_builder,
+        label_fn=_make_label_fn(tickers, horizon),
+        horizon=horizon,
+        signal_fn=_top_n_signal_fn(top_n),
+        rebalance_frequency_days=rebalance_frequency_days,
+    )
+
+
+class TestRebalanceFrequency:
+    """Verify rebalance_frequency_days controls weight update cadence."""
+
+    def test_default_frequency_1_in_params(self):
+        s = _make_strategy_with_freq(["SPY", "QQQ"], rebalance_frequency_days=1)
+        assert s.params()["rebalance_frequency_days"] == 1
+
+    def test_frequency_5_in_params(self):
+        s = _make_strategy_with_freq(["SPY", "QQQ"], rebalance_frequency_days=5)
+        assert s.params()["rebalance_frequency_days"] == 5
+
+    def test_default_produces_same_output_shape(self):
+        tickers = ["SPY", "QQQ", "IWM", "EEM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+        s = _make_strategy_with_freq(tickers, rebalance_frequency_days=1)
+        s.fit(prices)
+        weights = s.generate_weights(prices)
+        assert weights.shape == (len(prices), len(tickers))
+
+    def test_5day_rebalance_produces_same_output_shape(self):
+        tickers = ["SPY", "QQQ", "IWM", "EEM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+        s = _make_strategy_with_freq(tickers, rebalance_frequency_days=5)
+        s.fit(prices)
+        weights = s.generate_weights(prices)
+        assert weights.shape == (len(prices), len(tickers))
+
+    def test_5day_weights_constant_between_rebalances(self):
+        """Weights must not change on non-rebalance dates (forward-fill guarantee)."""
+        tickers = ["SPY", "QQQ", "IWM", "EEM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+        freq = 5
+        s = _make_strategy_with_freq(tickers, rebalance_frequency_days=freq)
+        s.fit(prices)
+        weights = s.generate_weights(prices)
+
+        # Active rows: where at least one asset has non-zero weight
+        active_mask = weights.abs().sum(axis=1) > 1e-8
+        active_weights = weights[active_mask]
+
+        if len(active_weights) < freq + 1:
+            return  # not enough data to test this invariant
+
+        # Changes are rows where weights differ from previous row
+        changes = (active_weights.diff().abs().sum(axis=1) > 1e-8)
+        change_positions = changes[changes].index
+
+        # Verify that consecutive changes are at least `freq` days apart
+        # (using integer positions in the full price index)
+        for i in range(len(change_positions) - 1):
+            pos_a = prices.index.get_loc(change_positions[i])
+            pos_b = prices.index.get_loc(change_positions[i + 1])
+            assert pos_b - pos_a >= freq, (
+                f"Weight changed at positions {pos_a} and {pos_b}, "
+                f"gap {pos_b - pos_a} < rebalance_frequency_days={freq}"
+            )
+
+    def test_5day_turnover_zero_on_non_rebalance_dates(self):
+        """Turnover must be zero on every date except the rebalance dates."""
+        tickers = ["SPY", "QQQ", "IWM", "EEM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+        freq = 5
+        s = _make_strategy_with_freq(tickers, rebalance_frequency_days=freq)
+        s.fit(prices)
+        weights = s.generate_weights(prices)
+
+        # Daily turnover proxy: sum of absolute weight changes
+        daily_turnover = weights.diff().abs().sum(axis=1)
+
+        # On dates that are NOT rebalance dates (positions not divisible by freq),
+        # turnover must be zero (forward-fill, no changes)
+        for i, to in enumerate(daily_turnover.iloc[1:], start=1):
+            if i % freq != 0:
+                assert to < 1e-8, (
+                    f"Non-zero turnover {to:.6f} on non-rebalance date at position {i}"
+                )
+
+    def test_default_frequency_matches_daily_strategy(self):
+        """rebalance_frequency_days=1 must produce identical weights to the original strategy."""
+        tickers = ["SPY", "QQQ", "IWM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+
+        s_daily = _make_strategy(tickers, top_n=2, horizon=5)
+        s_freq1 = _make_strategy_with_freq(tickers, top_n=2, horizon=5, rebalance_frequency_days=1)
+
+        # Fit both with identical seeds (same model class, same data)
+        s_daily.fit(prices)
+        s_freq1.fit(prices)
+
+        w_daily = s_daily.generate_weights(prices)
+        w_freq1 = s_freq1.generate_weights(prices)
+
+        # Shapes must match
+        assert w_daily.shape == w_freq1.shape
+        # Values must be identical (same code path when frequency=1)
+        import numpy as np
+        assert np.allclose(w_daily.values, w_freq1.values, atol=1e-10)
+
+    def test_active_rows_sum_to_one_under_5day_rebalance(self):
+        tickers = ["SPY", "QQQ", "IWM", "EEM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+        s = _make_strategy_with_freq(tickers, top_n=2, rebalance_frequency_days=5)
+        s.fit(prices)
+        weights = s.generate_weights(prices)
+
+        active = weights.abs().sum(axis=1) > 1e-8
+        row_sums = weights[active].sum(axis=1)
+        assert (row_sums - 1.0).abs().max() < 1e-8
+
+    def test_output_index_matches_prices_under_5day_rebalance(self):
+        tickers = ["SPY", "QQQ", "IWM"]
+        prices = _make_prices(n_dates=350, tickers=tickers)
+        s = _make_strategy_with_freq(tickers, rebalance_frequency_days=5)
+        s.fit(prices)
+        weights = s.generate_weights(prices)
+        assert (weights.index == prices.index).all()

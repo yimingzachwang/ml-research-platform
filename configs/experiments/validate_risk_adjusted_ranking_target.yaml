@@ -1,0 +1,144 @@
+# Validation experiment for risk_adjusted_ranking_target label (Phase A).
+#
+# Identical to canonical_ml_multi_asset.yaml with ONE change:
+#   labels.type: risk_adjusted_ranking_target  (was: ranking_target)
+#
+# Purpose: verify end-to-end execution, IC, diagnostics, and walk-forward
+# validation work correctly with the new label before canonical adoption.
+#
+# Run with:
+#   python scripts/run_from_config.py configs/experiments/validate_risk_adjusted_ranking_target.yaml --report
+
+version: "2"
+name: validate_risk_adjusted_ranking_target
+description: >
+  Phase A validation experiment. Identical universe, features, model, and signal
+  as canonical_ml_multi_asset. Only change: labels.type = risk_adjusted_ranking_target.
+  Verifies end-to-end pipeline compatibility for the new label.
+tags:
+  - ml
+  - regression
+  - ridge
+  - multi_asset
+  - cross_sectional
+  - panel
+  - phase_a_validation
+  - risk_adjusted_ranking_target
+
+universe:
+  tickers:
+    - SPY
+    - QQQ
+    - IWM
+    - EEM
+    - TLT
+    - GLD
+    - XLF
+    - XLK
+    - XLE
+
+date_range:
+  start: "2013-01-01"
+  end: "2024-12-31"
+
+features:
+  ticker: SPY
+  entries:
+    - name: mom_20
+      type: momentum
+      params:
+        lookback: 20
+
+    - name: mom_60
+      type: momentum
+      params:
+        lookback: 60
+
+    - name: mom_252
+      type: momentum
+      params:
+        lookback: 252
+
+    - name: vol_21
+      type: rolling_volatility
+      params:
+        window: 21
+
+    - name: zscore_20
+      type: rolling_zscore
+      params:
+        window: 20
+
+    - name: trend_20
+      type: trend_strength
+      params:
+        window: 20
+
+    - name: mom_5
+      type: momentum
+      params:
+        lookback: 5
+
+    - name: trend_persist_20d
+      type: trend_persistence
+      params:
+        window: 20
+
+    - name: breakout_63d
+      type: breakout_strength
+      params:
+        window: 63
+
+    - name: drawdown_dist_252d
+      type: drawdown_distance
+      params:
+        window: 252
+
+    - name: vol_compress_21_63
+      type: vol_compression
+      params:
+        short_window: 21
+        long_window: 63
+
+    - name: beta_60d
+      type: rolling_beta
+      params:
+        window: 60
+        market_ticker: SPY
+
+    - name: sharpe_mom_252d
+      type: risk_adjusted_momentum
+      params:
+        mom_window: 252
+        vol_window: 63
+
+labels:
+  type: risk_adjusted_ranking_target
+  params:
+    horizon: 21
+
+model:
+  type: RidgeRegression
+  params:
+    alpha: 0.5
+
+signal:
+  type: top_n
+  params:
+    n: 3
+
+validation:
+  type: rolling
+  parameters:
+    train_months: 48
+    test_months: 12
+    gap_days: 0
+
+execution:
+  transaction_cost_bps: 5.0
+
+output:
+  base_dir: results/experiments
+  registry_path: results/experiments/registry.json
+  register: true
+  save_plots: true

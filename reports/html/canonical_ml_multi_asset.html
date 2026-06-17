@@ -25,11 +25,11 @@ p{margin:.75em 0}
 <ul>
 <li><strong>Period:</strong> 2013-01-01 to 2024-12-31</li>
 <li><strong>Universe:</strong> SPY, QQQ, IWM, EEM, TLT, GLD, XLF, XLK, XLE</li>
-<li><strong>Sharpe ratio:</strong> 0.5481</li>
+<li><strong>Sharpe ratio:</strong> 0.5995</li>
 </ul>
 <h2>Research Thesis &amp; Methodology</h2>
 <p>
-<strong>Hypothesis:</strong> A shared RidgeRegression model predicts cross-sectional return ranks across the 9-asset universe using 13 engineered features applied independently to each asset. The top-ranked assets by predicted score, held equal-weight, earn a 21-day forward return edge over the universe after transaction costs.
+<strong>Hypothesis:</strong> A shared RidgeRegression model predicts cross-sectional return ranks across the 9-asset universe using 15 engineered features applied independently to each asset. The top-ranked assets by predicted score, held equal-weight, earn a 21-day forward return edge over the universe after transaction costs.
 </p>
 <p>
 <strong>Feature rationale:</strong>
@@ -44,7 +44,7 @@ p{margin:.75em 0}
 <li>**<code>drawdown_dist_252d</code>** (window: 252): Drawdown distance measures the current price&#x27;s percentage decline from its rolling N-period peak: (price / rolling_max) − 1 over a long lookback window. Unlike short-horizon breakout strength, this captures sustained stress-state positioning — whether an asset remains in an extended drawdown relative to its annual price history. Assets with large negative values are in prolonged underperformance regimes; values near zero indicate the asset is near or recovering to its annual high-water mark.</li>
 <li>**<code>vol_compress_21_63</code>**: Volatility compression measures the ratio of short-term to long-term realised volatility. A ratio below 1.0 indicates a compressed-vol regime — recent realised vol has contracted relative to its medium-term baseline. This is a breakout precursor indicator: periods of sustained vol compression historically precede regime transitions. A ratio above 1.0 indicates vol expansion, consistent with an active stress or dislocation environment.</li>
 <li>**<code>beta_60d</code>** (window: 60): Rolling market beta measures each asset&#x27;s time-varying sensitivity to the market reference (SPY): Cov(r_asset, r_market) / Var(r_market) over a rolling window. In a cross-sectional ranking framework, beta captures which assets are currently high-beta (amplified systematic exposure) vs defensive (low-beta) — information that is orthogonal to price-history momentum and directly relevant to regime positioning. A model learning positive beta coefficients is selecting high-beta assets in trending markets; negative coefficients indicate a preference for defensives.</li>
-<li>**<code>sharpe_mom_252d</code>**: Risk-adjusted momentum divides the trailing N-period return by rolling realised volatility — a Sharpe-like signal measuring momentum quality rather than raw magnitude. Two assets with equal 12-month momentum but different volatilities receive different scores: the lower-vol asset achieves its return more efficiently. This exposes whether the model rewards momentum consistency (efficient uptrends) or raw return regardless of the risk taken to achieve it.</li>
+<li>**<code>sharpe_mom_63d</code>**: Risk-adjusted momentum divides the trailing N-period return by rolling realised volatility — a Sharpe-like signal measuring momentum quality rather than raw magnitude. Two assets with equal 12-month momentum but different volatilities receive different scores: the lower-vol asset achieves its return more efficiently. This exposes whether the model rewards momentum consistency (efficient uptrends) or raw return regardless of the risk taken to achieve it.</li>
 </ul>
 <p>
 <strong>Label construction:</strong> <code>ranking_target</code> with 21-period horizon. Cross-sectional return rank labels normalise each asset&#x27;s forward return to a percentile position within the universe on each date. Ranking eliminates the effect of aggregate market moves, focusing the model on relative outperformance — a cleaner signal for cross-sectional selection.
@@ -147,7 +147,7 @@ All 9 assets have complete coverage across all 3,020 trading days (2013-01-02 �
 The 9-asset aligned price panel is transformed into a structured feature space. Each feature operationalises a specific hypothesis about the information content embedded in price time series — momentum persistence, volatility clustering, or trend strength. All features are constructed as pure functions of historical prices, ensuring no look-ahead contamination at the feature generation stage.
 </p>
 <p>
-<strong>Feature registry</strong> — 13 features applied independently to each of the 9 universe assets:
+<strong>Feature registry</strong> — 15 features applied independently to each of the 9 universe assets:
 </p>
 <table><thead>
 <tr><th>Name</th><th>Family</th><th>Transform</th><th>Window</th><th>Normalisation</th></tr>
@@ -164,6 +164,8 @@ The 9-asset aligned price panel is transformed into a structured feature space. 
 <tr><td>252D Drawdown Distance</td><td>Mean-Reversion</td><td>price_vs_rolling_peak</td><td>252</td><td>raw</td></tr>
 <tr><td>Vol Compression (21/63D)</td><td>Volatility</td><td>short_long_vol_ratio</td><td>—</td><td>raw</td></tr>
 <tr><td>60D Market Beta</td><td>Market Structure</td><td>rolling_cov_over_var</td><td>60</td><td>raw</td></tr>
+<tr><td>63D Risk-Adj Momentum</td><td>Trend</td><td>momentum_over_vol</td><td>—</td><td>raw</td></tr>
+<tr><td>126D Risk-Adj Momentum</td><td>Trend</td><td>momentum_over_vol</td><td>—</td><td>raw</td></tr>
 <tr><td>252D Risk-Adj Momentum</td><td>Trend</td><td>momentum_over_vol</td><td>—</td><td>raw</td></tr>
 </tbody></table>
 <p>
@@ -213,6 +215,8 @@ The 9-asset aligned price panel is transformed into a structured feature space. 
 <tr><td>252D Drawdown Distance</td><td>-0.0812</td><td>0.0854</td><td>-1.59</td><td>0.992</td><td>100.0%</td></tr>
 <tr><td>Vol Compression (21/63D)</td><td>0.9789</td><td>0.2202</td><td>0.22</td><td>0.971</td><td>100.0%</td></tr>
 <tr><td>60D Market Beta</td><td>0.8147</td><td>0.5613</td><td>-1.08</td><td>0.999</td><td>100.0%</td></tr>
+<tr><td>63D Risk-Adj Momentum</td><td>0.1855</td><td>0.4744</td><td>0.14</td><td>0.979</td><td>100.0%</td></tr>
+<tr><td>126D Risk-Adj Momentum</td><td>0.3523</td><td>0.6964</td><td>0.23</td><td>0.987</td><td>100.0%</td></tr>
 <tr><td>252D Risk-Adj Momentum</td><td>0.6711</td><td>1.1610</td><td>0.50</td><td>0.994</td><td>100.0%</td></tr>
 </tbody></table>
 <figure><img src="../figures/canonical_ml_multi_asset/feature_correlation_heatmap.png" alt="Feature Correlation Heatmap"><figcaption>Feature Correlation Heatmap</figcaption></figure>
@@ -233,13 +237,13 @@ The 9-asset aligned price panel is transformed into a structured feature space. 
 <table><thead>
 <tr><th>Family</th><th>Features</th><th>Hypothesis</th></tr>
 </tr></thead><tbody>
-<tr><td>Trend</td><td>20D Momentum, 60D Momentum, 252D Momentum, 20D Trend Strength, 5D Momentum, 20D Trend Persistence, 63D Breakout Strength, 252D Risk-Adj Momentum</td><td>Directional momentum and price-continuation signals. Positive IC in trending regimes; may …</td></tr>
+<tr><td>Trend</td><td>20D Momentum, 60D Momentum, 252D Momentum, 20D Trend Strength, 5D Momentum, 20D Trend Persistence, 63D Breakout Strength, 63D Risk-Adj Momentum, 126D Risk-Adj Momentum, 252D Risk-Adj Momentum</td><td>Directional momentum and price-continuation signals. Positive IC in trending regimes; may …</td></tr>
 <tr><td>Volatility</td><td>21D Realized Volatility, Vol Compression (21/63D)</td><td>Risk-regime indicators capturing realised and implied volatility structure. Tend to be neg…</td></tr>
 <tr><td>Mean-Reversion</td><td>20D Z-Score, 252D Drawdown Distance</td><td>Price normalisation and short-horizon reversion pressure. Effective when markets are range…</td></tr>
 <tr><td>Market Structure</td><td>60D Market Beta</td><td>Systematic risk exposure and cross-asset sensitivity dynamics. Rolling beta captures time-…</td></tr>
 </tbody></table>
 <p>
-This experiment deploys 13 features across 4 canonical families. Each family operationalises a distinct market hypothesis; orthogonal families provide diversified information sources, reducing model dependence on any single regime hypothesis.
+This experiment deploys 15 features across 4 canonical families. Each family operationalises a distinct market hypothesis; orthogonal families provide diversified information sources, reducing model dependence on any single regime hypothesis.
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/feature_family_ic.png" alt="Feature Family Ic"><figcaption>Feature Family Ic</figcaption></figure>
 <p>
@@ -282,13 +286,25 @@ drawdown_t      = ( equity_t - max_{s&lt;=t} equity_s ) / max_{s&lt;=t} equity_s
 </p>
 <h2>Portfolio Construction Process</h2>
 <p>
+<strong>Research configuration:</strong>
+</p>
+<table><thead>
+<tr><th>Parameter</th><th>Value</th></tr>
+</tr></thead><tbody>
+<tr><td>Training Window</td><td>48 months (rolling)</td></tr>
+<tr><td>Forecast Horizon</td><td>21 trading days</td></tr>
+</tbody></table>
+<p>
+The model uses a rolling 48-month training window and 21-day forward horizon.
+</p>
+<p>
 **Signal-to-portfolio pipeline for <code>RidgeRegression</code> (panel cross-sectional):**
 </p>
 <p>
 <code>`</code>
 prices[t-window : t]
-  → feature_matrix(&#x27;mom_20&#x27;, &#x27;mom_60&#x27;, &#x27;mom_252&#x27;, &#x27;vol_21&#x27;, ... (13 total))
-       (X: 13 columns, no NaN rows, pre-alignment)
+  → feature_matrix(&#x27;mom_20&#x27;, &#x27;mom_60&#x27;, &#x27;mom_252&#x27;, &#x27;vol_21&#x27;, ... (15 total))
+       (X: 15 columns, no NaN rows, pre-alignment)
   → RidgeRegression.predict(X_clean)
        (raw score: expected ranking target)
   → signal_fn(predictions)   [top_n]
@@ -312,6 +328,49 @@ prices[t-window : t]
 <p>
 *Portfolio turnover quantifies daily weight change magnitude — the primary determinant of transaction cost drag. Periods of elevated turnover reduce net returns through friction. Turnover spikes that coincide with drawdown periods indicate cost-exacerbated losses: the signal is reversing precisely when it is most expensive to act on, amplifying rather than merely reducing performance.*
 </p>
+<h2>Allocation Research</h2>
+<p>
+<strong>Allocation policy:</strong> equal-weight (1/k per selected asset).
+</p>
+<p>
+<strong>Concentration summary:</strong>
+</p>
+<table><thead>
+<tr><th>Metric</th><th>Value</th></tr>
+</tr></thead><tbody>
+<tr><td>Mean HHI (Σwᵢ²)</td><td>0.3333</td></tr>
+<tr><td>Mean effective breadth (1/HHI)</td><td>3.00</td></tr>
+<tr><td>Entropy effective N (exp(H))</td><td>3.00</td></tr>
+<tr><td>Mean assets held</td><td>3.0 (max 3)</td></tr>
+<tr><td>Mean max weight per period</td><td>0.333</td></tr>
+</tbody></table>
+<p>
+Allocation concentration is moderate (mean HHI 0.333). The model distributes exposure across several assets but maintains meaningful differentiation — the effective breadth of {mean_breadth:.1f} implied bets is consistent with an informative cross-sectional ranking.
+</p>
+<figure><img src="../figures/canonical_ml_multi_asset/allocation_concentration_evolution.png" alt="Allocation Concentration Evolution"><figcaption>Allocation Concentration Evolution</figcaption></figure>
+<p>
+*HHI (top), effective breadth (middle), and entropy effective-N (bottom) through time. Elevated HHI with depressed breadth identifies concentration regimes; periods where effective-N approaches the basket size confirm near-uniform allocation. The 63-day rolling mean smooths short-term rebalance noise to reveal structural regime transitions.*
+</p>
+<p>
+<strong>Prediction dispersion:</strong>
+</p>
+<p>
+Mean cross-sectional prediction σ = 0.0363; mean top-minus-bottom spread = 0.1023. Low σ identifies score-compression regimes where ranking information is minimal; near-zero spread indicates ranking indifference.
+</p>
+<figure><img src="../figures/canonical_ml_multi_asset/prediction_dispersion.png" alt="Prediction Dispersion"><figcaption>Prediction Dispersion</figcaption></figure>
+<p>
+*Rolling 63-day cross-sectional prediction standard deviation (top) and top-minus-bottom score spread (bottom). Score compression periods (depressed σ) indicate regimes where model confidence is uniformly low and cross-sectional differentiation carries little economic signal. Near-zero spread regimes are especially problematic for confidence-weighted allocation schemes.*
+</p>
+<p>
+<strong>Confidence calibration:</strong>
+</p>
+<p>
+Prediction scores are monotonically calibrated: assets in the highest quintile (Q5) realized a 0.0152 return advantage over the lowest quintile (Q1) on average. This confirms that score magnitude — not merely sign — carries economically meaningful cross-sectional information and validates confidence-weighted allocation.
+</p>
+<figure><img src="../figures/canonical_ml_multi_asset/confidence_calibration.png" alt="Confidence Calibration"><figcaption>Confidence Calibration</figcaption></figure>
+<p>
+*Mean realized forward return by prediction-score quintile (Q1 = lowest to Q5 = highest). A left-to-right increasing pattern confirms that score magnitude carries economic information — higher-confidence predictions correspond to stronger realized returns. Non-monotonic patterns flag calibration failure and indicate that equal-weight allocation may dominate confidence-weighted schemes in this experiment.*
+</p>
 <h2>ML Model Behaviour</h2>
 <p>
 <strong>Predictive quality:</strong>
@@ -319,22 +378,22 @@ prices[t-window : t]
 <table><thead>
 <tr><th>Metric</th><th>Value</th></tr>
 </tr></thead><tbody>
-<tr><td>Positive-IC ranking periods (full period)</td><td>63.1%</td></tr>
-<tr><td>Mean monthly cross-sectional IC</td><td>0.1450</td></tr>
-<tr><td>% months with positive cross-sectional IC</td><td>65.6%</td></tr>
+<tr><td>Positive-IC ranking periods (full period)</td><td>62.7%</td></tr>
+<tr><td>Mean monthly cross-sectional IC</td><td>0.1460</td></tr>
+<tr><td>% months with positive cross-sectional IC</td><td>66.4%</td></tr>
 <tr><td>Model-fitting observations (post-NaN removal)</td><td>24,912</td></tr>
 </tbody></table>
 <figure><img src="../figures/canonical_ml_multi_asset/cross_sectional_ic.png" alt="Cross Sectional Ic"><figcaption>Cross Sectional Ic</figcaption></figure>
 <p>
-*Daily cross-sectional IC — mean 0.145 (66% of days positive), strong ranking signal. Persistent negative stretches mark regimes where the feature space inverted its cross-sectional prediction, not random noise.*
+*Daily cross-sectional IC — mean 0.146 (66% of days positive), strong ranking signal. Persistent negative stretches mark regimes where the feature space inverted its cross-sectional prediction, not random noise.*
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/ml_ic_regime.png" alt="Ml Ic Regime"><figcaption>Ml Ic Regime</figcaption></figure>
 <p>
-*63-day rolling mean cross-sectional IC — mean 0.145 (66% positive), strong ranking signal. Troughs identify regimes where cross-sectional feature relationships inverted or collapsed; recoveries confirm regime-specific rather than permanent model failure.*
+*63-day rolling mean cross-sectional IC — mean 0.146 (66% positive), strong ranking signal. Troughs identify regimes where cross-sectional feature relationships inverted or collapsed; recoveries confirm regime-specific rather than permanent model failure.*
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/ml_rolling_da.png" alt="Ml Rolling Da"><figcaption>Ml Rolling Da</figcaption></figure>
 <p>
-*126-day rolling IC consistency — full-period positive-IC rate 63.1%. Persistent troughs below 50% identify regimes where the cross-sectional ranking inverted: the model systematically mispredicted relative return order. Recovery above 50% confirms regime-specific rather than permanent breakdown.*
+*126-day rolling IC consistency — full-period positive-IC rate 62.7%. Persistent troughs below 50% identify regimes where the cross-sectional ranking inverted: the model systematically mispredicted relative return order. Recovery above 50% confirms regime-specific rather than permanent breakdown.*
 </p>
 <h3>Cross-Sectional Ranking Geometry</h3>
 <p>
@@ -343,26 +402,22 @@ The following diagnostics expose the statistical geometry of the cross-sectional
 <table><thead>
 <tr><th>Metric</th><th>Value</th></tr>
 </tr></thead><tbody>
-<tr><td>Mean cross-sectional score IQR</td><td>0.0346</td></tr>
-<tr><td>Min score IQR (most compressed regime)</td><td>0.0120</td></tr>
-<tr><td>Mean top-bottom score spread</td><td>0.0715</td></tr>
-<tr><td>Mean realized spread (top − bottom, pre-cost)</td><td>0.891% (positive)</td></tr>
-<tr><td>Fraction of periods with positive realized spread</td><td>69%</td></tr>
-<tr><td>Mean monthly rank autocorrelation</td><td>0.785</td></tr>
+<tr><td>Mean cross-sectional score IQR</td><td>0.0344</td></tr>
+<tr><td>Min score IQR (most compressed regime)</td><td>0.0118</td></tr>
+<tr><td>Mean top-bottom score spread</td><td>0.0717</td></tr>
+<tr><td>Mean realized spread (top − bottom, pre-cost)</td><td>0.898% (positive)</td></tr>
+<tr><td>Fraction of periods with positive realized spread</td><td>71%</td></tr>
+<tr><td>Mean monthly rank autocorrelation</td><td>0.790</td></tr>
 <tr><td>Fraction of months with positive rank persistence</td><td>100%</td></tr>
 </tbody></table>
 <p>
-Score IQR remained above its minimum throughout (mean 0.0346, min 0.0120). The model maintained measurable cross-sectional separation across regimes.
+Score IQR remained above its minimum throughout (mean 0.0344, min 0.0118). The model maintained measurable cross-sectional separation across regimes.
 </p>
 <p>
 Mean rank autocorrelation 0.79 — rankings were highly persistent. The model&#x27;s ordering of assets was stable across consecutive rebalance periods, consistent with a momentum-driven hypothesis. 100% of monthly transitions had positive rank autocorrelation.
 </p>
 <p>
-Realized top-bottom spread averaged 0.89% per period (69% of periods positive) — the model&#x27;s score ranking corresponded to economic outcome separation over this horizon. This is a pre-cost gross spread; execution costs and market impact reduce the realisable advantage.
-</p>
-<figure><img src="../figures/canonical_ml_multi_asset/ranking_geometry.png" alt="Ranking Geometry"><figcaption>Ranking Geometry</figcaption></figure>
-<p>
-*Cross-sectional ranking geometry: prediction dispersion (score IQR) and IC instability (IC std, right axis); score discrimination (top-minus-bottom spread); realized return discrimination; and monthly rank autocorrelation. Periods of simultaneous IQR compression and elevated IC std identify regimes of compressed-but-erratic ranking — the most diagnostically significant failure state for a cross-sectional model.*
+Realized top-bottom spread averaged 0.90% per period (71% of periods positive) — the model&#x27;s score ranking corresponded to economic outcome separation over this horizon. This is a pre-cost gross spread; execution costs and market impact reduce the realisable advantage.
 </p>
 <h3>Prediction Confidence &amp; Outcome Monotonicity</h3>
 <p>
@@ -371,16 +426,16 @@ Assets are ranked by predicted cross-sectional score on each monthly rebalance d
 <table><thead>
 <tr><th>Prediction Group</th><th>Mean 21D Realized Return</th></tr>
 </tr></thead><tbody>
-<tr><td>Top group (highest scores)</td><td>1.301%</td></tr>
-<tr><td>Mid group</td><td>1.050%</td></tr>
-<tr><td>Bottom group (lowest scores)</td><td>0.231%</td></tr>
-<tr><td>Long-short spread (top − bottom)</td><td>1.070%</td></tr>
+<tr><td>Top group (highest scores)</td><td>1.302%</td></tr>
+<tr><td>Mid group</td><td>1.056%</td></tr>
+<tr><td>Bottom group (lowest scores)</td><td>0.224%</td></tr>
+<tr><td>Long-short spread (top − bottom)</td><td>1.078%</td></tr>
 </tbody></table>
 <p>
 Realized return ordering is <strong>monotonic</strong> (top &gt; mid &gt; bottom). Score magnitude carries economically meaningful cross-sectional information: the model&#x27;s ranking conviction corresponds to realized outcome strength.
 </p>
 <p>
-The 21D long-short spread between top and bottom groups is 1.07% (positive). This is a pre-cost gross spread diagnostic, not a realisable strategy return. It quantifies the raw ranking discrimination of the signal before portfolio construction, transaction costs, and execution frictions.
+The 21D long-short spread between top and bottom groups is 1.08% (positive). This is a pre-cost gross spread diagnostic, not a realisable strategy return. It quantifies the raw ranking discrimination of the signal before portfolio construction, transaction costs, and execution frictions.
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/prediction_strength.png" alt="Prediction Strength"><figcaption>Prediction Strength</figcaption></figure>
 <p>
@@ -392,30 +447,32 @@ The 21D long-short spread between top and bottom groups is 1.07% (positive). Thi
 <table><thead>
 <tr><th>Feature</th><th>Full-period coef</th><th>Mean OOS coef</th><th>Sign consistency</th></tr>
 </tr></thead><tbody>
-<tr><td>20D Trend Persistence</td><td>+0.0780</td><td>+0.0948</td><td>100%</td></tr>
-<tr><td>60D Market Beta</td><td>+0.0519</td><td>+0.0543</td><td>100%</td></tr>
-<tr><td>252D Risk-Adj Momentum</td><td>+0.0214</td><td>+0.0436</td><td>100%</td></tr>
-<tr><td>252D Momentum</td><td>-0.0663</td><td>-0.3660</td><td>86%</td></tr>
-<tr><td>252D Drawdown Distance</td><td>+0.0569</td><td>+0.3327</td><td>86%</td></tr>
-<tr><td>20D Trend Strength</td><td>-0.0042</td><td>-0.0159</td><td>71%</td></tr>
-<tr><td>Vol Compression (21/63D)</td><td>-0.0350</td><td>-0.0389</td><td>71%</td></tr>
-<tr><td>20D Momentum</td><td>-0.0893</td><td>-0.0491</td><td>57%</td></tr>
-<tr><td>60D Momentum</td><td>-0.0846</td><td>-0.1992</td><td>57%</td></tr>
-<tr><td>5D Momentum</td><td>+0.0567</td><td>-0.0012</td><td>57%</td></tr>
-<tr><td>21D Realized Volatility</td><td>-0.0185</td><td>+0.0023</td><td>43%</td></tr>
-<tr><td>20D Z-Score</td><td>+0.0002</td><td>-0.0020</td><td>43%</td></tr>
-<tr><td>63D Breakout Strength</td><td>-0.1753</td><td>-0.0097</td><td>43%</td></tr>
+<tr><td>60D Market Beta</td><td>+0.0522</td><td>+0.0544</td><td>100%</td></tr>
+<tr><td>252D Momentum</td><td>-0.0519</td><td>-0.3604</td><td>86%</td></tr>
+<tr><td>20D Trend Persistence</td><td>+0.0762</td><td>+0.0875</td><td>86%</td></tr>
+<tr><td>252D Drawdown Distance</td><td>+0.0691</td><td>+0.3863</td><td>86%</td></tr>
+<tr><td>252D Risk-Adj Momentum</td><td>+0.0203</td><td>+0.0436</td><td>86%</td></tr>
+<tr><td>60D Momentum</td><td>-0.1387</td><td>-0.3019</td><td>71%</td></tr>
+<tr><td>20D Trend Strength</td><td>-0.0051</td><td>-0.0176</td><td>71%</td></tr>
+<tr><td>Vol Compression (21/63D)</td><td>-0.0342</td><td>-0.0372</td><td>71%</td></tr>
+<tr><td>63D Risk-Adj Momentum</td><td>+0.0177</td><td>+0.0316</td><td>71%</td></tr>
+<tr><td>126D Risk-Adj Momentum</td><td>-0.0091</td><td>-0.0172</td><td>71%</td></tr>
+<tr><td>20D Momentum</td><td>-0.0744</td><td>-0.0196</td><td>57%</td></tr>
+<tr><td>20D Z-Score</td><td>-0.0001</td><td>-0.0029</td><td>57%</td></tr>
+<tr><td>5D Momentum</td><td>+0.0558</td><td>-0.0040</td><td>57%</td></tr>
+<tr><td>21D Realized Volatility</td><td>-0.0194</td><td>+0.0030</td><td>43%</td></tr>
+<tr><td>63D Breakout Strength</td><td>-0.1749</td><td>+0.0060</td><td>43%</td></tr>
 </tbody></table>
 <p>
 *Full-period coef is from the model fitted on all data; mean OOS coef is the average across walk-forward splits. Divergence between the two indicates regime-specific learning — the full-period model captures structure the walk-forward splits did not consistently reproduce.*
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/ml_coefficient_stability.png" alt="Ml Coefficient Stability"><figcaption>Ml Coefficient Stability</figcaption></figure>
 <p>
-*20D Trend Persistence most stable (100% sign consistency); 21D Realized Volatility least stable (43%) — regime-dependent contribution. Wide error bars or sign reversals indicate training-regime-specific fitting.*
+*60D Market Beta most stable (100% sign consistency); 21D Realized Volatility least stable (43%) — regime-dependent contribution. Wide error bars or sign reversals indicate training-regime-specific fitting.*
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/ml_coefficient_sign_heatmap.png" alt="Ml Coefficient Sign Heatmap"><figcaption>Ml Coefficient Sign Heatmap</figcaption></figure>
 <p>
-*<code>20D Momentum</code>, <code>60D Momentum</code>, <code>21D Realized Volatility</code> change sign across splits — regime-specific learning, not stable directional relationships. Stable features maintain colour throughout; reversals are the instability signature.*
+*<code>20D Momentum</code>, <code>21D Realized Volatility</code>, <code>20D Z-Score</code> change sign across splits — regime-specific learning, not stable directional relationships. Stable features maintain colour throughout; reversals are the instability signature.*
 </p>
 <h3>Temporal Feature Contribution</h3>
 <p>
@@ -424,16 +481,16 @@ Feature contribution measures realised predictive influence: coefficient × stan
 <table><thead>
 <tr><th>Diagnostic</th><th>Value</th></tr>
 </tr></thead><tbody>
-<tr><td>Dominant family (by contribution share)</td><td>Trend (96% of periods)</td></tr>
-<tr><td>Family leadership transitions</td><td>8</td></tr>
+<tr><td>Dominant family (by contribution share)</td><td>Trend (97% of periods)</td></tr>
+<tr><td>Family leadership transitions</td><td>6</td></tr>
 <tr><td>Mean contribution concentration (HHI)</td><td>0.437 — concentrated (one family dominates)</td></tr>
 <tr><td>Most temporally volatile feature</td><td>63D Breakout Strength</td></tr>
 </tbody></table>
 <p>
-The <strong>Trend</strong> family dominated predictions in 96% of periods, indicating the model&#x27;s cross-sectional ranking signal was concentrated in a single predictive hypothesis for most of the backtest. This is characteristic of a momentum-regime environment where trend information dominates.
+The <strong>Trend</strong> family dominated predictions in 97% of periods, indicating the model&#x27;s cross-sectional ranking signal was concentrated in a single predictive hypothesis for most of the backtest. This is characteristic of a momentum-regime environment where trend information dominates.
 </p>
 <p>
-Contribution structure was stable and concentrated — 8 family leadership transitions across the backtest — consistent with a model that operated in persistent predictive regimes rather than frequently adapting.
+Contribution structure was stable and concentrated — 6 family leadership transitions across the backtest — consistent with a model that operated in persistent predictive regimes rather than frequently adapting.
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/feature_contribution_heatmap.png" alt="Feature Contribution Heatmap"><figcaption>Feature Contribution Heatmap</figcaption></figure>
 <p>
@@ -450,7 +507,7 @@ The 7 walk-forward test windows are classified into high-volatility (3 splits) a
 <table><thead>
 <tr><th>Feature Family</th><th>High-Vol Mean IC</th><th>Low-Vol Mean IC</th><th>Differential</th></tr>
 </tr></thead><tbody>
-<tr><td>Trend</td><td>+0.031</td><td>+0.032</td><td>-0.001</td></tr>
+<tr><td>Trend</td><td>+0.040</td><td>+0.030</td><td>+0.010</td></tr>
 <tr><td>Volatility</td><td>+0.033</td><td>-0.029</td><td>+0.061</td></tr>
 <tr><td>Mean-Reversion</td><td>+0.039</td><td>+0.028</td><td>+0.011</td></tr>
 <tr><td>Market Structure</td><td>+0.062</td><td>+0.188</td><td>-0.127</td></tr>
@@ -469,16 +526,16 @@ The <strong>Market Structure</strong> family provided the strongest cross-sectio
 <table><thead>
 <tr><th>Metric</th><th>Value</th></tr>
 </tr></thead><tbody>
-<tr><td>Annualized Return</td><td>0.0976</td></tr>
-<tr><td>Annualized Volatility</td><td>0.2106</td></tr>
-<tr><td>Sharpe Ratio</td><td>0.5481</td></tr>
+<tr><td>Annualized Return</td><td>0.1091</td></tr>
+<tr><td>Annualized Volatility</td><td>0.2096</td></tr>
+<tr><td>Sharpe Ratio</td><td>0.5995</td></tr>
 <tr><td>Max Drawdown</td><td>-0.4500</td></tr>
-<tr><td>Calmar Ratio</td><td>0.2168</td></tr>
-<tr><td>Hit Rate</td><td>0.4967</td></tr>
+<tr><td>Calmar Ratio</td><td>0.2424</td></tr>
+<tr><td>Hit Rate</td><td>0.4987</td></tr>
 </tbody></table>
 <figure><img src="../figures/canonical_ml_multi_asset/equity_and_drawdown.png" alt="Equity And Drawdown"><figcaption>Equity And Drawdown</figcaption></figure>
 <p>
-*Max drawdown -45.0% — severe. Sharpe 0.55. Slow recovery indicates signal-edge loss, not random noise.*
+*Max drawdown -45.0% — severe. Sharpe 0.60. Slow recovery indicates signal-edge loss, not random noise.*
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/rolling_sharpe.png" alt="Rolling Sharpe"><figcaption>Rolling Sharpe</figcaption></figure>
 <p>
@@ -512,21 +569,21 @@ Chronological rolling validation: each test window immediately follows its train
 </p>
 <figure><img src="../figures/canonical_ml_multi_asset/train_vs_test_sharpe.png" alt="Train Vs Test Sharpe"><figcaption>Train Vs Test Sharpe</figcaption></figure>
 <p>
-*Mean OOS Sharpe 0.64 across 7 splits (positive, 71% positive). Large per-split gaps mark regime-specific overfitting.*
+*Mean OOS Sharpe 0.56 across 7 splits (positive, 57% positive). Large per-split gaps mark regime-specific overfitting.*
 </p>
 <h2>Failure Analysis</h2>
 <p>
 <strong>Failure analysis — ML signal:</strong>
 </p>
 <p>
-*Out-of-sample verdict:* RidgeRegression demonstrates robust out-of-sample performance: 5 of 7 test windows were positive (mean OOS Sharpe: 0.64).
+*Out-of-sample verdict:* RidgeRegression shows marginal out-of-sample performance: 3 of 7 test windows were negative (mean OOS Sharpe: 0.56). The signal is present but inconsistent across market regimes.
 </p>
 <p>
 <strong>Known failure modes for ML price-history strategies:</strong>
 </p>
 <ul>
-<li>*Regime non-stationarity* — Feature-return relationships shift across macro regimes (risk-on/risk-off, trending/mean-reverting, high/low volatility). A model trained on 2013–2016 data learns relationships that may not hold in 2022 tightening cycles or 2020 dislocation episodes. Mean cross-sectional IC of 0.145 confirms ranking signal exists in aggregate, but sub-period IC variation (visible in the IC chart) reveals regime dependence.</li>
-<li>*Feature instability* — <code>mom_20</code>, <code>mom_60</code>, <code>vol_21</code>, <code>zscore_20</code> show sign consistency below 60% across walk-forward splits, indicating their directional contribution reverses in different training regimes. The model is learning regime-specific patterns, not persistent market relationships.</li>
+<li>*Regime non-stationarity* — Feature-return relationships shift across macro regimes (risk-on/risk-off, trending/mean-reverting, high/low volatility). A model trained on 2013–2016 data learns relationships that may not hold in 2022 tightening cycles or 2020 dislocation episodes. Mean cross-sectional IC of 0.146 confirms ranking signal exists in aggregate, but sub-period IC variation (visible in the IC chart) reveals regime dependence.</li>
+<li>*Feature instability* — <code>mom_20</code>, <code>vol_21</code>, <code>zscore_20</code>, <code>mom_5</code> show sign consistency below 60% across walk-forward splits, indicating their directional contribution reverses in different training regimes. The model is learning regime-specific patterns, not persistent market relationships.</li>
 <li>*Overfitting on training regime* — Ridge regularisation constrains but does not eliminate overfitting risk. Large train-to-test Sharpe gaps in specific splits are the diagnostic signature of regime-specific learning.</li>
 <li>*Cross-sectional dispersion collapse* — In low-dispersion regimes where all assets trend together, the cross-sectional model has little return differentiation to exploit. The top-N signal concentrates in whichever assets have marginally higher scores, but all scores are clustered — the effective information content drops.</li>
 <li>*Transaction cost drag from universe rotation* — Holding the top-N assets requires full rebalancing when the composition changes. In regimes of high score volatility, turnover rises sharply and cost drag erodes signal value.</li>
@@ -535,7 +592,7 @@ Chronological rolling validation: each test window immediately follows its train
 <strong>Instability propagation:</strong>
 </p>
 <p>
-Coefficient sign reversals in 20D Momentum, 60D Momentum, 21D Realized Volatility indicate the model learned regime-specific rather than structural relationships. IC is consistently positive (66% of periods, mean 0.1450), propagating coefficient instability into signal degradation. Positive-IC rate (63.1%) is above random; instability in learned feature weights propagates into cross-sectional ranking errors that reach portfolio returns.
+Coefficient sign reversals in 20D Momentum, 21D Realized Volatility, 20D Z-Score indicate the model learned regime-specific rather than structural relationships. IC is consistently positive (66% of periods, mean 0.1460), propagating coefficient instability into signal degradation. Positive-IC rate (62.7%) is above random; instability in learned feature weights propagates into cross-sectional ranking errors that reach portfolio returns.
 </p>
 <p>
 <strong>Identified drawdown windows (&gt; 5% peak-to-trough):</strong>
@@ -543,18 +600,18 @@ Coefficient sign reversals in 20D Momentum, 60D Momentum, 21D Realized Volatilit
 <table><thead>
 <tr><th>Drawdown Start</th><th>Trough</th><th>Recovery</th><th>Max DD</th><th>Duration</th></tr>
 </tr></thead><tbody>
-<tr><td>2020-02-24</td><td>2020-03-23</td><td>2021-02-03</td><td>-45.0%</td><td>345d</td></tr>
-<tr><td>2018-10-05</td><td>2018-12-24</td><td>2019-03-21</td><td>-24.9%</td><td>167d</td></tr>
-<tr><td>2022-04-05</td><td>2022-06-16</td><td>2023-07-18</td><td>-24.5%</td><td>469d</td></tr>
+<tr><td>2020-02-24</td><td>2020-03-23</td><td>2020-12-17</td><td>-45.0%</td><td>297d</td></tr>
+<tr><td>2022-04-05</td><td>2022-06-16</td><td>2023-07-19</td><td>-25.7%</td><td>470d</td></tr>
+<tr><td>2018-11-08</td><td>2018-12-24</td><td>2019-03-21</td><td>-24.3%</td><td>133d</td></tr>
 </tbody></table>
 <p>
 <strong>Worst out-of-sample split:</strong>
 </p>
 <ul>
-<li>Split 1 — test period 2018-01-02 to 2018-12-31</li>
-<li>Sharpe: -1.07</li>
-<li>Return: -18.5%</li>
-<li>Max DD: -29.0%</li>
+<li>Split 5 — test period 2022-01-03 to 2022-12-30</li>
+<li>Sharpe: -0.95</li>
+<li>Return: -26.8%</li>
+<li>Max DD: -32.1%</li>
 </ul>
 <figure><img src="../figures/canonical_ml_multi_asset/split_equity_curves.png" alt="Split Equity Curves"><figcaption>Split Equity Curves</figcaption></figure>
 <p>
@@ -569,18 +626,18 @@ Detailed diagnostics for walk-forward validation and ML signal quality.
 <tr><th>Metric</th><th>Value</th></tr>
 </tr></thead><tbody>
 <tr><td>Splits</td><td>7</td></tr>
-<tr><td>Mean Sharpe</td><td>0.6450</td></tr>
-<tr><td>Std Sharpe</td><td>1.4365</td></tr>
-<tr><td>Positive-Sharpe rate</td><td>71.4%</td></tr>
-<tr><td>Mean annualised return</td><td>5.40%</td></tr>
-<tr><td>Mean max drawdown</td><td>-20.57%</td></tr>
-<tr><td>Worst max drawdown</td><td>-47.13%</td></tr>
+<tr><td>Mean Sharpe</td><td>0.5627</td></tr>
+<tr><td>Std Sharpe</td><td>1.3090</td></tr>
+<tr><td>Positive-Sharpe rate</td><td>57.1%</td></tr>
+<tr><td>Mean annualised return</td><td>3.72%</td></tr>
+<tr><td>Mean max drawdown</td><td>-20.17%</td></tr>
+<tr><td>Worst max drawdown</td><td>-45.75%</td></tr>
 </tbody></table>
 <h3>ML Signal Diagnostics</h3>
 <table><thead>
 <tr><th>Metric</th><th>Value</th></tr>
 </tr></thead><tbody>
-<tr><td>Avg daily turnover</td><td>0.1266</td></tr>
+<tr><td>Avg daily turnover</td><td>0.1366</td></tr>
 <tr><td>Signal activity</td><td>91.6%</td></tr>
 </tbody></table>
 <h2>Metadata</h2>
@@ -589,7 +646,7 @@ Detailed diagnostics for walk-forward validation and ML signal quality.
 </tr></thead><tbody>
 <tr><td>Experiment</td><td><code>canonical_ml_multi_asset</code></td></tr>
 <tr><td>Strategy</td><td><code>PanelMLStrategy(Ridge(alpha=0.5))</code></td></tr>
-<tr><td>Created</td><td>2026-05-28T16:31:22.031214+00:00</td></tr>
+<tr><td>Created</td><td>2026-06-13T14:42:47.386959+00:00</td></tr>
 </tbody></table>
 <h2>Configuration</h2>
 <p>
@@ -621,16 +678,36 @@ Detailed diagnostics for walk-forward validation and ML signal quality.
 <p>
 *Coefficient trajectory across walk-forward splits (chronological). Stable features maintain consistent sign and magnitude; unstable features cross zero, indicating regime-dependent learning.*
 </p>
+<h3>Ranking Geometry Iqr</h3>
+<figure><img src="../figures/canonical_ml_multi_asset/ranking_geometry_iqr.png" alt="Ranking Geometry Iqr"><figcaption>Ranking Geometry Iqr</figcaption></figure>
+<p>
+*Prediction dispersion — rolling score IQR (filled, left axis) and rolling IC standard deviation (dashed, right axis). Low IQR with high IC std identifies compressed-but-erratic regimes where the model assigns similar scores but the IC is volatile.*
+</p>
+<h3>Ranking Geometry Spread</h3>
+<figure><img src="../figures/canonical_ml_multi_asset/ranking_geometry_spread.png" alt="Ranking Geometry Spread"><figcaption>Ranking Geometry Spread</figcaption></figure>
+<p>
+*Score discrimination — rolling top-vs-bottom score spread (63d avg). Near-zero values indicate the model assigns similar scores to the highest and lowest ranked assets, making allocation effectively arbitrary.*
+</p>
+<h3>Ranking Geometry Realized</h3>
+<figure><img src="../figures/canonical_ml_multi_asset/ranking_geometry_realized.png" alt="Ranking Geometry Realized"><figcaption>Ranking Geometry Realized</figcaption></figure>
+<p>
+*Realized discrimination — rolling realized forward-return spread between top and bottom ranked groups (63d avg, pre-cost gross). Economic confirmation of whether score separation translates to outcome separation. Green fill = positive spread; red = reversal.*
+</p>
+<h3>Ranking Geometry Persistence</h3>
+<figure><img src="../figures/canonical_ml_multi_asset/ranking_geometry_persistence.png" alt="Ranking Geometry Persistence"><figcaption>Ranking Geometry Persistence</figcaption></figure>
+<p>
+*Rank persistence — monthly Spearman autocorrelation of asset score rankings. High values indicate stable model convictions; near-zero marks regimes where rankings flip arbitrarily each rebalance, amplifying turnover without informational content.*
+</p>
 <h2>Provenance</h2>
 <table><thead>
 <tr><th>Key</th><th>Value</th></tr>
 </tr></thead><tbody>
-<tr><td>ML hash</td><td><code>57f80a44d026</code></td></tr>
+<tr><td>ML hash</td><td><code>c2fa0f450af7</code></td></tr>
 </tbody></table>
 <hr>
 <p>
 Report version: 1
-Generated: 2026-05-28T16:32:11.773897+00:00
+Generated: 2026-06-13T14:43:39.620323+00:00
 Source experiment: canonical_ml_multi_asset
 </p>
 </body>

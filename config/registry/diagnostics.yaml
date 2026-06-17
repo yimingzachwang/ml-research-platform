@@ -1,0 +1,76 @@
+# Registry of currently supported diagnostic outputs.
+# These correspond to artefacts and report sections produced by the engine.
+# Conservative — only includes diagnostics that are demonstrably produced.
+# Expand in future phases as the reporting layer is extended.
+
+split_metrics:
+  display_name: Split Metrics
+  description: >
+    Per-fold out-of-sample performance metrics for each walk-forward split.
+    Stored in diagnostics/split_metrics.json. Required for the Diagnostics
+    Appendix report section and for artefact completeness verification.
+  artefact_path: diagnostics/split_metrics.json
+  required_for_complete_artefact: true
+  notes: >
+    Absence of split_metrics.json causes verify_experiment_artifacts to return
+    artefact_status: "incomplete". This is a hard dependency for LLM review.
+
+feature_importance:
+  display_name: Feature Importance
+  description: >
+    Feature-level importance scores (coefficient magnitudes or permutation
+    importance) aggregated across walk-forward folds. Produced when the model
+    supports feature importance extraction (linear models with coefficients).
+  artefact_path: diagnostics/feature_importance.json
+  required_for_complete_artefact: false
+  notes: All current supported model types (LinearRegression, Ridge, Lasso, etc.) produce feature coefficients.
+
+regime_analysis:
+  display_name: Regime Analysis
+  description: >
+    Performance breakdown by detected market regime (trend, mean-reversion, low-vol,
+    high-vol, etc.). Produced by the regime module when include_diagnostics is True
+    in the report spec.
+  artefact_path: diagnostics/regime_analysis.json
+  required_for_complete_artefact: false
+  notes: ""
+
+sharpe_ratio:
+  display_name: Sharpe Ratio (OOS)
+  description: >
+    Out-of-sample annualised Sharpe ratio of the strategy. The primary completeness
+    metric. A null sharpe_ratio blocks compare_experiment_metrics and LLM review.
+    Stored in metrics.json as sharpe_ratio.
+  artefact_path: metrics.json
+  required_for_complete_artefact: true
+  field: sharpe_ratio
+  notes: >
+    _CORE_REQUIRED_METRICS in research_api.py = ("sharpe_ratio",).
+    Any experiment with sharpe_ratio: null fails the incomplete-metrics gate.
+
+mean_oos_sharpe:
+  display_name: Mean Out-of-Sample Sharpe
+  description: >
+    Mean Sharpe ratio across all walk-forward test folds. Stored in metrics.json.
+    Provides a fold-averaged view of strategy quality separate from the
+    cumulative OOS Sharpe.
+  artefact_path: metrics.json
+  required_for_complete_artefact: false
+  field: mean_oos_sharpe
+  notes: ""
+
+annual_return:
+  display_name: Annualised Return (OOS)
+  description: OOS annualised return. Stored in metrics.json.
+  artefact_path: metrics.json
+  required_for_complete_artefact: false
+  field: annual_return
+  notes: ""
+
+max_drawdown:
+  display_name: Maximum Drawdown (OOS)
+  description: Maximum peak-to-trough drawdown over the OOS period. Stored in metrics.json.
+  artefact_path: metrics.json
+  required_for_complete_artefact: false
+  field: max_drawdown
+  notes: ""

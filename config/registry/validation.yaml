@@ -1,0 +1,77 @@
+# Registry of supported validation/walk-forward protocols.
+# Source of truth: src/experiments/ml_config._VALID_VALIDATION_TYPES
+# Supported types: rolling, expanding, none
+
+rolling:
+  display_name: Rolling Walk-Forward
+  description: >
+    Fixed-size training window that rolls forward in time. Each test fold uses a
+    training set of exactly train_months months ending at the fold start date.
+    The most common validation protocol for time-series ML experiments.
+  required_params:
+    - train_months
+    - test_months
+  optional_params:
+    gap_days:
+      type: int
+      default: 0
+      change_path: validation.parameters.gap_days
+      notes: Gap between training end and test start (days). Use to prevent look-ahead.
+  default_params:
+    train_months: 36
+    test_months: 6
+    gap_days: 0
+  minimum_data_guidance: >
+    Minimum series length: train_months + test_months months (at least one fold).
+    Recommended: train_months * 2 + test_months for stable parameter estimates.
+  notes: >
+    Rolling validation produces more folds than expanding for a given dataset.
+    Useful when regime stationarity is assumed within the training window.
+    Most Phase 1/2 experiments use rolling with train=36, test=6.
+
+expanding:
+  display_name: Expanding Walk-Forward
+  description: >
+    Expanding training window: each fold uses all available history up to the fold
+    start date. Training set grows with each fold. Tests the hypothesis that
+    more data is always better.
+  required_params:
+    - train_months
+    - test_months
+  optional_params:
+    gap_days:
+      type: int
+      default: 0
+      change_path: validation.parameters.gap_days
+  default_params:
+    train_months: 36
+    test_months: 6
+    gap_days: 0
+  minimum_data_guidance: >
+    Minimum series length: same as rolling — train_months initial burn-in.
+    Later folds will train on progressively larger datasets.
+  notes: >
+    Use when you expect long-run persistence in the signal and want to leverage
+    all available history. Expanding window tends to produce fewer but more
+    stable folds toward the end of the evaluation period.
+
+none:
+  display_name: No Validation (Holdout Only)
+  description: >
+    No walk-forward cross-validation. A single in-sample / out-of-sample split.
+    All data before a fixed point is used for training; all data after is held out.
+    Use for quick exploration only — results are not cross-validated.
+  required_params: []
+  optional_params:
+    train_months:
+      type: int
+      notes: If omitted, uses all data before the holdout.
+    test_months:
+      type: int
+      notes: Holdout size. If omitted, uses all remaining data.
+  default_params: {}
+  minimum_data_guidance: >
+    No minimum enforced, but a minimum of 24 months total is recommended.
+  notes: >
+    Not recommended for production research. Use rolling or expanding for
+    any publishable or decision-support experiment.

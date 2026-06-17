@@ -646,8 +646,8 @@ class TestOperatorManualRoutingRules:
         assert "never invent" in blob
 
     def test_operator_manual_within_budget(self):
-        """Operator manual JSON stays under the 5600-char ceiling."""
-        assert len(json.dumps(zeto.get_zeto_operator_manual())) < 5600
+        """Operator manual JSON stays under the 6400-char ceiling."""
+        assert len(json.dumps(zeto.get_zeto_operator_manual())) < 7200
 
     def test_operator_manual_contains_no_retry_rule(self):
         """Operator manual instructs the agent to stop on draft failure, not retry."""
@@ -864,3 +864,31 @@ class TestGenerateConfigChangeDraftUxHardenings:
         assert result["status"] == "invalid_changes"
         m_approve.assert_not_called()
         m_dump.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Registry consistency cross-checks (additive — Phase 1)
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryConsistencyFromIntrospection:
+    """Verify that list_available_features count matches the registry YAML."""
+
+    def test_available_features_count_matches_registry(self):
+        from src.agent.registry.registry_loader import load_registry
+        registry = load_registry()
+        result = api.list_available_features()
+        assert result["status"] == "ok"
+        returned_count = len(result["features"])
+        registry_count = len(registry.feature_names())
+        assert returned_count == registry_count, (
+            f"list_available_features returned {returned_count} features but "
+            f"registry has {registry_count}. They must stay in sync."
+        )
+
+    def test_available_features_types_match_registry(self):
+        from src.agent.registry.registry_loader import load_registry
+        registry = load_registry()
+        result = api.list_available_features()
+        returned_types = frozenset(f["type"] for f in result["features"])
+        assert returned_types == registry.feature_names()

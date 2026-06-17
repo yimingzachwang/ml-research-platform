@@ -122,21 +122,21 @@ def _build_plots(
 
     # --- Standard set ---
     plots["equity_and_drawdown"] = plot_equity_and_drawdown(
-        backtest_df, title=f"{strategy_name} — Equity & Drawdown"
+        backtest_df, title="Equity & Drawdown"
     )
     plots["rolling_sharpe"] = plot_rolling_sharpe(
-        backtest_df, title=f"{strategy_name} — Rolling Sharpe Ratio (252d)"
+        backtest_df, title="Rolling Sharpe Ratio (252d)"
     )
     plots["rolling_volatility"] = plot_rolling_volatility(
-        backtest_df, title=f"{strategy_name} — Rolling Volatility (63d)"
+        backtest_df, title="Rolling Volatility (63d)"
     )
 
     if weights is not None and not weights.empty:
         plots["allocation_history"] = plot_weights(
-            weights, title=f"{strategy_name} — Allocation History"
+            weights, title="Allocation History"
         )
         plots["portfolio_turnover"] = plot_turnover(
-            weights, title=f"{strategy_name} — Portfolio Turnover"
+            weights, title="Portfolio Turnover"
         )
 
     # --- Walk-forward set ---
@@ -147,19 +147,19 @@ def _build_plots(
             plot_walk_forward_timeline,
         )
         plots["walk_forward_stitched"] = plot_walk_forward_stitched(
-            wf, title=f"{strategy_name} — Walk-Forward (stitched)"
+            wf, title="Walk-Forward (stitched)"
         )
         plots["split_sharpes"] = plot_split_sharpes(
-            wf, title=f"{strategy_name} — Split Sharpe Ratios"
+            wf, title="Split Sharpe Ratios"
         )
         plots["split_equity_curves"] = plot_walk_forward_equity(
-            wf, title=f"{strategy_name} — Walk-Forward Equity Curves"
+            wf, title="Walk-Forward Equity Curves"
         )
         plots["train_vs_test_sharpe"] = plot_train_vs_test(
-            wf, title=f"{strategy_name} — Train vs Test Sharpe"
+            wf, title="Train vs Test Sharpe"
         )
         plots["walk_forward_timeline"] = plot_walk_forward_timeline(
-            wf, title=f"{strategy_name} — Walk-Forward Window Timeline"
+            wf, title="Walk-Forward Window Timeline"
         )
 
     # --- ML diagnostic set ---
@@ -179,7 +179,7 @@ def _build_plots(
 
         if ic_series is not None and len(ic_series) >= 2:
             plots["ml_information_coefficient"] = plot_information_coefficient(
-                ic_series, title=f"{strategy_name} — Prediction Correlation (monthly)"
+                ic_series, title="Prediction Correlation (monthly)"
             )
         # Cross-sectional IC (panel mode primary inline figure)
         cs_ic_daily = ml_data.get("cs_ic_daily")
@@ -187,7 +187,7 @@ def _build_plots(
             from src.visualization.ml_plots import plot_ic_regime
             plots["cross_sectional_ic"] = plot_ic_regime(
                 cs_ic_daily,
-                title=f"{strategy_name} — Daily Cross-Sectional IC",
+                title="Cross-Sectional Information Coefficient",
                 stress_mask=stress_mask,
             )
 
@@ -196,7 +196,7 @@ def _build_plots(
             from src.visualization.ml_plots import plot_ic_regime
             plots["ml_ic_regime"] = plot_ic_regime(
                 ic_daily_rolling,
-                title=f"{strategy_name} — Rolling IC Through Time",
+                title="Rolling Cross-Sectional Information Coefficient",
                 stress_mask=stress_mask,
             )
         rolling_da = ml_data.get("rolling_da")
@@ -204,9 +204,9 @@ def _build_plots(
             from src.visualization.ml_plots import plot_rolling_directional_accuracy
             is_panel_da = ml_data.get("is_panel", False)
             da_title = (
-                f"{strategy_name} — Rolling IC Consistency (126d)"
+                "Rolling Ranking Accuracy"
                 if is_panel_da
-                else f"{strategy_name} — Rolling Directional Accuracy (126d)"
+                else "Rolling Directional Accuracy (126d)"
             )
             plots["ml_rolling_da"] = plot_rolling_directional_accuracy(
                 rolling_da,
@@ -216,11 +216,11 @@ def _build_plots(
             )
         if predictions is not None and len(predictions) >= 10:
             plots["ml_prediction_distribution"] = plot_prediction_distribution(
-                predictions, title=f"{strategy_name} — Prediction Distribution"
+                predictions, title="Prediction Distribution"
             )
         if coeff_stability is not None and not coeff_stability.empty:
             plots["ml_coefficient_stability"] = plot_coefficient_stability(
-                coeff_stability, title=f"{strategy_name} — Coefficient Stability"
+                coeff_stability, title="Coefficient Stability Analysis"
             )
         # Temporal split labels shared across heatmaps
         wf_split_labels: list[str] | None = None
@@ -237,12 +237,12 @@ def _build_plots(
             )
             plots["ml_coefficient_evolution"] = plot_coefficient_evolution(
                 coeff_stability_df,
-                title=f"{strategy_name} — Coefficient Evolution",
+                title="Coefficient Evolution Across Walk-Forward Splits",
                 split_labels=wf_split_labels,
             )
             plots["ml_coefficient_sign_heatmap"] = plot_coefficient_sign_heatmap(
                 coeff_stability_df,
-                title=f"{strategy_name} — Coefficient Sign Stability",
+                title="Coefficient Sign Consistency by Walk-Forward Split",
                 split_labels=wf_split_labels,
             )
 
@@ -251,7 +251,7 @@ def _build_plots(
             from src.visualization.ml_plots import plot_feature_ic_heatmap
             plots["feature_ic_heatmap"] = plot_feature_ic_heatmap(
                 feature_ic_df,
-                title=f"{strategy_name} — Per-Feature IC by Walk-Forward Split",
+                title="Feature Information Coefficient by Walk-Forward Split",
                 split_labels=wf_split_labels,
             )
 
@@ -261,7 +261,7 @@ def _build_plots(
                 plots["feature_family_ic"] = plot_feature_family_ic(
                     feature_ic_df,
                     feature_families,
-                    title=f"{strategy_name} — Feature Family IC by Walk-Forward Split",
+                    title="Feature Family Information Coefficient by Walk-Forward Split",
                     split_labels=wf_split_labels,
                 )
 
@@ -273,7 +273,7 @@ def _build_plots(
                 plots["ic_by_vol_regime"] = plot_ic_by_vol_regime(
                     regime_stats["family_ic_by_regime"],
                     ml_data.get("feature_families"),
-                    title=f"{strategy_name} — Feature Family IC by Volatility Regime",
+                    title="Regime-Conditional Feature Information Coefficient",
                 )
             except Exception:
                 pass
@@ -285,20 +285,26 @@ def _build_plots(
                 from src.visualization.ml_plots import plot_prediction_strength
                 plots["prediction_strength"] = plot_prediction_strength(
                     ps_data,
-                    title=f"{strategy_name} — Prediction Strength by Score Group",
+                    title="Prediction Strength by Score Group",
                 )
             except Exception:
                 pass
 
-        # Ranking geometry plot (Phase I — S1-S5 statistical state observability)
+        # Ranking geometry plots (Phase I — S1-S5 statistical state observability)
+        # plot_ranking_geometry returns dict[str, plt.Figure] — one figure per dimension.
         rg_data = ml_data.get("ranking_geometry") or {}
         if rg_data:
             try:
                 from src.visualization.ml_plots import plot_ranking_geometry
-                plots["ranking_geometry"] = plot_ranking_geometry(
+                _rg_figs = plot_ranking_geometry(
                     rg_data,
-                    title=f"{strategy_name} — Cross-Sectional Ranking Geometry",
+                    title="Cross-Sectional Ranking Geometry",
                 )
+                for _rg_key, _rg_fig in _rg_figs.items():
+                    if _rg_key == "empty":
+                        plots["ranking_geometry"] = _rg_fig
+                    else:
+                        plots[f"ranking_geometry_{_rg_key}"] = _rg_fig
             except Exception:
                 pass
 
@@ -315,7 +321,7 @@ def _build_plots(
                     plots["feature_contribution_heatmap"] = plot_feature_contribution_heatmap(
                         contrib_df,
                         feature_families=ml_data.get("feature_families"),
-                        title=f"{strategy_name} — Feature Contribution Through Time",
+                        title="Feature Contribution Through Time",
                     )
             except Exception:
                 pass
@@ -327,7 +333,7 @@ def _build_plots(
                     plots["family_contribution_timeline"] = plot_family_contribution_timeline(
                         fam_contrib,
                         fam_share,
-                        title=f"{strategy_name} — Feature Family Contribution Timeline",
+                        title="Feature Family Contribution Timeline",
                     )
             except Exception:
                 pass
@@ -345,32 +351,32 @@ def _build_plots(
                 if ar_weights is not None and not ar_weights.empty:
                     plots["allocation_concentration_evolution"] = plot_concentration_evolution(
                         ar_weights,
-                        title=f"{strategy_name} — Allocation Concentration Through Time",
+                        title="Allocation Concentration Through Time",
                     )
                 ar_scores = alloc_research.get("score_wide")
                 if ar_scores is not None and not ar_scores.empty:
                     plots["prediction_dispersion"] = plot_prediction_dispersion(
                         ar_scores,
                         stress_mask=stress_mask,
-                        title=f"{strategy_name} — Cross-Sectional Prediction Dispersion",
+                        title="Cross-Sectional Prediction Dispersion",
                     )
                 ar_calib = alloc_research.get("calibration_data")
                 if ar_calib:
                     plots["confidence_calibration"] = plot_confidence_calibration(
                         ar_calib,
-                        title=f"{strategy_name} — Confidence Calibration",
+                        title="Confidence Calibration",
                     )
             except Exception:
                 pass
 
         if signal_turnover_series is not None and len(signal_turnover_series) >= 2:
             plots["ml_signal_turnover"] = plot_signal_turnover(
-                signal_turnover_series, title=f"{strategy_name} — Signal Turnover"
+                signal_turnover_series, title="Signal Turnover"
             )
         if feature_corr_df is not None and len(feature_corr_df) >= 2:
             plots["feature_correlation_heatmap"] = plot_feature_correlation_heatmap(
                 feature_corr_df,
-                title=f"{strategy_name} — Feature Correlation Matrix",
+                title="Feature Correlation Matrix",
                 feature_families=ml_data.get("feature_families"),
             )
         feature_matrix = ml_data.get("feature_matrix")
@@ -378,7 +384,7 @@ def _build_plots(
             from src.visualization.ml_plots import plot_feature_heatmap
             plots["ml_feature_regimes"] = plot_feature_heatmap(
                 feature_matrix,
-                title=f"{strategy_name} — Feature Regime Behaviour",
+                title="Feature Regime Evolution",
             )
 
         # D6: prediction vs actual scatter + overlay
@@ -388,11 +394,11 @@ def _build_plots(
             from src.visualization.ml_plots import plot_prediction_vs_actual, plot_residuals
             plots["ml_prediction_vs_actual"] = plot_prediction_vs_actual(
                 actual_s, pred_aligned_s,
-                title=f"{strategy_name} — Prediction vs Actual",
+                title="Prediction vs Actual",
             )
             plots["ml_residuals"] = plot_residuals(
                 actual_s, pred_aligned_s,
-                title=f"{strategy_name} — Residual Diagnostics",
+                title="Residual Diagnostics",
             )
 
     # --- Universe diagnostic set ---
@@ -407,7 +413,7 @@ def _build_plots(
         if monthly_cov is not None and not monthly_cov.empty:
             plots["universe_coverage_heatmap"] = plot_universe_coverage_heatmap(
                 monthly_cov,
-                title=f"{strategy_name} — Universe Coverage by Asset & Month",
+                title="Universe Coverage by Asset & Month",
             )
 
         if (universe_data.get("n_assets", 0) >= 2
@@ -424,21 +430,21 @@ def _build_plots(
                 avail_proxy[avail_proxy == 0] = float("nan")
                 plots["asset_availability_timeline"] = plot_asset_availability_timeline(
                     avail_proxy,
-                    title=f"{strategy_name} — Rolling Asset Availability",
+                    title="Rolling Asset Availability",
                 )
 
         vol_df = universe_data.get("rolling_vol_df")
         if vol_df is not None and not vol_df.empty:
             plots["cross_asset_volatility"] = plot_cross_asset_volatility(
                 vol_df,
-                title=f"{strategy_name} — Cross-Asset Realised Volatility (63d)",
+                title="Cross-Asset Realised Volatility (63d)",
             )
 
         corr_df = universe_data.get("corr_df")
         if corr_df is not None and len(corr_df) >= 2:
             plots["universe_correlation_heatmap"] = plot_universe_correlation_heatmap(
                 corr_df,
-                title=f"{strategy_name} — Cross-Asset Correlation Structure",
+                title="Cross-Asset Correlation Structure",
             )
 
     return plots
@@ -475,46 +481,52 @@ _PLOT_METADATA: list[dict[str, str]] = [
      "caption": "Distribution of raw model predictions. Near-symmetric distributions centred near zero indicate a well-calibrated model without directional drift or label leakage."},  # noqa: E501
     {"name": "ml_residuals", "group": "ml_signal", "importance": "primary",
      "caption": "Residual diagnostics: distribution of prediction errors (top) and rolling residual mean (bottom). A rolling mean persistently away from zero indicates systematic regime-specific bias."},  # noqa: E501
-    {"name": "ml_coefficient_stability", "group": "ml_model", "importance": "primary",
+    {"name": "ml_coefficient_stability", "display_name": "Coefficient Stability Analysis", "group": "ml_model", "importance": "primary",
      "caption": "Mean ± std of model coefficients across walk-forward splits. Bars with consistent sign and similar magnitude confirm a stable, replicable learned relationship."},  # noqa: E501
-    {"name": "ml_coefficient_evolution", "group": "ml_model", "importance": "secondary",
+    {"name": "ml_coefficient_evolution", "display_name": "Coefficient Evolution Across Walk-Forward Splits", "group": "ml_model", "importance": "secondary",
      "caption": "Coefficient trajectory across walk-forward splits (chronological). Stable features maintain consistent sign and magnitude; unstable features cross zero, indicating regime-dependent learning."},  # noqa: E501
     {"name": "ml_signal_turnover", "group": "ml_signal", "importance": "secondary",
      "caption": "Per-period signal turnover (absolute position change). High turnover inflates transaction costs; the model's net alpha must comfortably exceed the implied cost drag."},  # noqa: E501
     {"name": "feature_correlation_heatmap", "group": "ml_features", "importance": "secondary",
      "caption": "Pairwise Pearson correlation matrix of the feature space. Low off-diagonal values indicate orthogonal information dimensions; high correlations flag potential multicollinearity."},  # noqa: E501
-    {"name": "ml_feature_regimes", "group": "ml_features", "importance": "secondary",
+    {"name": "ml_feature_regimes", "display_name": "Feature Regime Evolution", "group": "ml_features", "importance": "secondary",
      "caption": "Feature z-score heatmap (±3σ). Red marks periods of extreme positive feature values; blue marks extreme negative. Reveals feature regime transitions and co-movement across the backtest period."},  # noqa: E501
-    {"name": "ml_ic_regime", "group": "ml_signal", "importance": "primary",
+    {"name": "ml_ic_regime", "display_name": "Rolling Cross-Sectional Information Coefficient", "group": "ml_signal", "importance": "primary",
      "caption": "63-day rolling mean cross-sectional IC through time. Green fill marks sustained periods of positive IC; red marks signal breakdown. Width of each regime reveals persistence vs transience."},  # noqa: E501
-    {"name": "ml_rolling_da", "group": "ml_signal", "importance": "primary",
+    {"name": "ml_rolling_da", "display_name": "Rolling Ranking Accuracy", "group": "ml_signal", "importance": "primary",
      "caption": "126-day rolling IC consistency: fraction of days with positive cross-sectional IC. Values above 0.50 indicate the model ranks assets correctly more often than not; below 0.50 marks signal degradation."},  # noqa: E501
-    {"name": "ml_coefficient_sign_heatmap", "group": "ml_model", "importance": "primary",
+    {"name": "ml_coefficient_sign_heatmap", "display_name": "Coefficient Sign Consistency by Walk-Forward Split", "group": "ml_model", "importance": "primary",
      "caption": "Coefficient values across walk-forward splits (x-axis) and features (y-axis). Blue = negative, red = positive; saturation encodes magnitude. Colour changes across splits reveal sign reversals and regime-specific learning."},  # noqa: E501
     {"name": "walk_forward_timeline", "group": "validation", "importance": "primary",
      "caption": "Gantt-style walk-forward window timeline. Each row is a split; grey = train window, coloured = test window (green positive OOS Sharpe, red negative). OOS Sharpe annotated on each test bar."},  # noqa: E501
-    {"name": "feature_ic_heatmap", "group": "ml_features", "importance": "primary",
+    {"name": "feature_ic_heatmap", "display_name": "Feature Information Coefficient by Walk-Forward Split", "group": "ml_features", "importance": "primary",
      "caption": "Per-feature IC against test-period labels by walk-forward split. Green = positive predictive IC; red = negative. Reveals which features drove signal quality in which regimes and where individual features broke down."},  # noqa: E501
-    {"name": "feature_family_ic", "group": "ml_features", "importance": "primary",
+    {"name": "feature_family_ic", "display_name": "Feature Family Information Coefficient by Walk-Forward Split", "group": "ml_features", "importance": "primary",
      "caption": "Mean IC aggregated by feature family across walk-forward splits. Grouped bars reveal which hypothesis families (Trend, Volatility, Mean-Reversion, Market Structure) provided net positive signal in each regime and which degraded."},  # noqa: E501
-    {"name": "ic_by_vol_regime", "group": "ml_features", "importance": "primary",
+    {"name": "ic_by_vol_regime", "display_name": "Regime-Conditional Feature Information Coefficient", "group": "ml_features", "importance": "primary",
      "caption": "Feature family mean IC disaggregated by volatility regime. Each family shows two bars: high-volatility test splits (solid) vs low-volatility test splits (faded). Reveals which feature families provided signal preferentially under stressed vs calm market conditions. The vol regime classification uses the median cross-asset 21D realised vol across walk-forward test windows as the threshold."},  # noqa: E501
     {"name": "prediction_strength", "group": "ml_signal", "importance": "primary",
      "caption": "Prediction-strength bucket analysis. Top panel: mean realized N-day forward return by prediction score group (top, mid, bottom thirds). Monotonic ordering left-to-right confirms that score magnitude — not merely sign — carries economically meaningful cross-sectional information. Bottom panel: cumulative return of each prediction group over time; persistent separation between top and bottom groups confirms durable signal strength."},  # noqa: E501
-    # Cross-sectional ranking geometry (Phase I)
-    {"name": "ranking_geometry", "group": "ml_signal", "importance": "primary",
-     "caption": "Cross-sectional ranking geometry — four panels covering signal geometry, discrimination, and temporal stability. Panel 1: rolling score IQR (left) and rolling IC standard deviation (right, dashed) — low IQR with high IC std identifies compressed-but-erratic regimes. Panel 2: rolling top-vs-bottom score spread — near-zero marks periods of ranking indifference. Panel 3: rolling realized forward-return spread between top and bottom ranked groups (pre-cost gross diagnostic). Panel 4: monthly Spearman rank autocorrelation — high values indicate stable model convictions; near-zero marks arbitrary rank flips each rebalance."},  # noqa: E501
+    # Cross-sectional ranking geometry — four standalone figures (Phase I)
+    {"name": "ranking_geometry_iqr", "display_name": "Prediction Dispersion", "group": "ml_signal", "importance": "primary",
+     "caption": "Prediction dispersion — rolling score IQR (filled, left axis) and rolling IC standard deviation (dashed, right axis). Low IQR with high IC std identifies compressed-but-erratic regimes where the model assigns similar scores but the IC is volatile."},  # noqa: E501
+    {"name": "ranking_geometry_spread", "display_name": "Score Discrimination", "group": "ml_signal", "importance": "primary",
+     "caption": "Score discrimination — rolling top-vs-bottom score spread (63d avg). Near-zero values indicate the model assigns similar scores to the highest and lowest ranked assets, making allocation effectively arbitrary."},  # noqa: E501
+    {"name": "ranking_geometry_realized", "display_name": "Realized Return Discrimination", "group": "ml_signal", "importance": "primary",
+     "caption": "Realized discrimination — rolling realized forward-return spread between top and bottom ranked groups (63d avg, pre-cost gross). Economic confirmation of whether score separation translates to outcome separation. Green fill = positive spread; red = reversal."},  # noqa: E501
+    {"name": "ranking_geometry_persistence", "display_name": "Ranking Persistence", "group": "ml_signal", "importance": "primary",
+     "caption": "Rank persistence — monthly Spearman autocorrelation of asset score rankings. High values indicate stable model convictions; near-zero marks regimes where rankings flip arbitrarily each rebalance, amplifying turnover without informational content."},  # noqa: E501
     # Feature contribution diagnostics (Phase II)
     {"name": "feature_contribution_heatmap", "group": "ml_model", "importance": "primary",
      "caption": "Feature contribution heatmap: realised predictive influence (coefficient × standardised feature value) for each feature through time, grouped by family. Red = positive contribution (model predicts above-average return for this feature state); blue = negative. Regime shifts appear as horizontal band colour transitions; simultaneous sign changes across a family reveal coordinated hypothesis activation or suppression."},  # noqa: E501
     {"name": "family_contribution_timeline", "group": "ml_model", "importance": "primary",
      "caption": "Feature family contribution timeline. Top panel: signed rolling family contributions — shows which hypothesis family drove predictions and in which direction. Bottom panel: normalised absolute contribution share — shows which family dominated regardless of sign. Regime shifts appear as share transitions between families; sustained dominance by one family indicates the model operated in a stable predictive regime."},  # noqa: E501
-    {"name": "cross_sectional_ic", "group": "ml_signal", "importance": "primary",
+    {"name": "cross_sectional_ic", "display_name": "Cross-Sectional Information Coefficient", "group": "ml_signal", "importance": "primary",
      "caption": "Daily cross-sectional Spearman IC: Spearman rank correlation between predicted scores and realized returns across all assets per date. Persistent positive values confirm the model correctly ranks assets in the cross-section."},  # noqa: E501
     # Allocation research (Phase 2 — panel mode only)
     {"name": "allocation_concentration_evolution", "group": "portfolio", "importance": "secondary",
      "caption": "Rolling 63-day concentration dynamics: HHI (top), effective breadth 1/HHI (middle), and entropy-based effective N (bottom). Equal-weight across k assets yields HHI = 1/k and effective N = k; higher HHI and lower breadth/N indicate concentrated bets. Persistent elevation in the HHI panel identifies regimes where the model systematically concentrates into a narrow set of assets."},  # noqa: E501
-    {"name": "prediction_dispersion", "group": "ml_signal", "importance": "secondary",
+    {"name": "prediction_dispersion", "display_name": "Cross-Sectional Prediction Dispersion", "group": "ml_signal", "importance": "secondary",
      "caption": "Rolling 63-day cross-sectional prediction dispersion: cross-sectional standard deviation of raw scores (top) and top-minus-bottom score spread (bottom). Low dispersion indicates score compression — the model assigns near-identical scores across all assets, making rank differences economically arbitrary. Near-zero spread identifies ranking indifference regimes where allocation becomes effectively random within the cross-section."},  # noqa: E501
     {"name": "confidence_calibration", "group": "ml_signal", "importance": "primary",
      "caption": "Confidence calibration: mean realized forward return by prediction-score quintile (Q1 = lowest scores to Q5 = highest). A monotonically increasing pattern — higher-scored assets realizing higher forward returns — confirms that prediction magnitude carries economic information beyond directional sign alone. Non-monotonic patterns reveal calibration failure and flag the need for equal-weight or threshold-gated allocation rather than confidence-weighted schemes."},  # noqa: E501
@@ -530,6 +542,13 @@ _PLOT_METADATA: list[dict[str, str]] = [
 ]
 
 
+# Canonical display name lookup: plot stem -> human-readable title for report headings.
+# Built from _PLOT_METADATA; falls back to stem.replace("_", " ").title() when absent.
+PLOT_DISPLAY_NAMES: dict[str, str] = {
+    e["name"]: e.get("display_name", e["name"].replace("_", " ").title())
+    for e in _PLOT_METADATA
+}
+
 def _write_plot_index(plots: dict, out_path: Path) -> None:
     """Write plots/plot_index.json — semantic ordering and captions for figures.
 
@@ -537,7 +556,10 @@ def _write_plot_index(plots: dict, out_path: Path) -> None:
     """
     plots_dir = out_path / "plots"
     plots_dir.mkdir(exist_ok=True)
-    index = [entry for entry in _PLOT_METADATA if entry["name"] in plots]
+    index = [
+        {**entry, "display_name": entry.get("display_name", entry["name"].replace("_", " ").title())}
+        for entry in _PLOT_METADATA if entry["name"] in plots
+    ]
     idx_path = plots_dir / "plot_index.json"
     with idx_path.open("w", encoding="utf-8") as f:
         json.dump(index, f, indent=2)
@@ -1475,6 +1497,7 @@ def _prepare_feature_diagnostics(
                 params.get("window")
                 or params.get("lookback")
                 or params.get("span")
+                or params.get("mom_window")
             )
             family = get_family_for_type(entry.type)
             registry.append({
@@ -1679,7 +1702,7 @@ def _prepare_prediction_strength(
 ) -> dict:
     """Prediction-strength bucket analysis: do stronger cross-sectional scores → stronger returns?
 
-    Ranks assets by predicted score on each monthly rebalance date, assigns to
+    Ranks assets by predicted score on each rebalance date, assigns to
     top/mid/bottom thirds, then computes realized forward returns per group.
     Used for the prediction confidence & outcome monotonicity diagnostic.
 
@@ -2817,9 +2840,98 @@ def _write_ml_provenance(
         "model": ml_spec.model.to_dict(),
         "signal": ml_spec.signal.to_dict(),
         "portfolio_construction": ml_spec.portfolio_construction.to_dict(),
+        "rebalance_frequency_days": ml_spec.rebalance_frequency_days,
+        "retrain_frequency_days": ml_spec.retrain_frequency_days,
     }
     with (out_path / "ml_provenance.json").open("w", encoding="utf-8") as f:
         json.dump(provenance, f, indent=2, sort_keys=True)
+
+
+def _write_reproducibility_artefacts(
+    ml_data: dict,
+    universe_data: dict,
+    out_path: Path,
+) -> None:
+    """Persist intermediate DataFrames required to regenerate report figures.
+
+    These DataFrames are computed in memory during figure generation but were
+    previously discarded after plotting.  All saves are best-effort and
+    individually isolated; a failure on one artefact does not block the others.
+
+    No existing JSON outputs, diagnostics, or reports are modified.  These
+    files are additive only.
+
+    Saved artefacts:
+        research/universe/rolling_vol_df.parquet     Date × Asset 63d rolling vol
+        research/universe/corr_df.parquet            Asset × Asset correlation matrix
+        research/ml/feature_matrix.parquet           MultiIndex (date, asset) × features
+        research/predictions/score_wide.parquet      Date × Asset prediction scores
+        research/predictions/group_monthly.parquet   Month × {top, mid, bottom} returns
+        diagnostics/ranking_geometry/rolling_score_iqr.parquet
+        diagnostics/ranking_geometry/rolling_score_spread.parquet
+        diagnostics/ranking_geometry/rolling_realized_spread.parquet
+        diagnostics/ranking_geometry/rank_persistence.parquet
+        research/feature_contributions/family_contrib_df.parquet
+        research/feature_contributions/family_share_df.parquet
+    """
+
+    def _save(df: Any, path: Path) -> None:
+        if df is None:
+            return
+        if hasattr(df, "empty") and df.empty:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(df, pd.Series):
+                df.to_frame().to_parquet(path)
+            else:
+                df.to_parquet(path)
+        except Exception:
+            pass
+
+    # ── Universe research ─────────────────────────────────────────────────────
+    _save(
+        universe_data.get("rolling_vol_df"),
+        out_path / "research" / "universe" / "rolling_vol_df.parquet",
+    )
+    _save(
+        universe_data.get("corr_df"),
+        out_path / "research" / "universe" / "corr_df.parquet",
+    )
+
+    # ── ML feature research ───────────────────────────────────────────────────
+    _save(
+        ml_data.get("feature_matrix"),
+        out_path / "research" / "ml" / "feature_matrix.parquet",
+    )
+
+    # ── Prediction research ───────────────────────────────────────────────────
+    _save(
+        ml_data.get("score_wide"),
+        out_path / "research" / "predictions" / "score_wide.parquet",
+    )
+    ps_data = ml_data.get("prediction_strength") or {}
+    _save(
+        ps_data.get("group_monthly"),
+        out_path / "research" / "predictions" / "group_monthly.parquet",
+    )
+
+    # ── Ranking geometry time-series ──────────────────────────────────────────
+    rg_data = ml_data.get("ranking_geometry") or {}
+    rg_dir = out_path / "diagnostics" / "ranking_geometry"
+    for _rg_key in (
+        "rolling_score_iqr",
+        "rolling_score_spread",
+        "rolling_realized_spread",
+        "rank_persistence",
+    ):
+        _save(rg_data.get(_rg_key), rg_dir / f"{_rg_key}.parquet")
+
+    # ── Feature contribution research ─────────────────────────────────────────
+    fc_data = ml_data.get("feature_contributions") or {}
+    fc_dir = out_path / "research" / "feature_contributions"
+    _save(fc_data.get("family_contrib_df"), fc_dir / "family_contrib_df.parquet")
+    _save(fc_data.get("family_share_df"), fc_dir / "family_share_df.parquet")
 
 
 def _run_ml_experiment(
@@ -2860,11 +2972,13 @@ def _run_ml_experiment(
     uni_spec = build_universe_spec(norm_cfg["universe"], norm_cfg["date_range"])
     is_panel = ml_spec.signal.type in PANEL_SIGNAL_TYPES
 
+    rebalance_frequency_days = ml_spec.rebalance_frequency_days
     if is_panel:
         strategy = build_panel_ml_strategy(
             ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal,
             list(uni_spec.tickers),
             portfolio_construction=ml_spec.portfolio_construction,
+            rebalance_frequency_days=rebalance_frequency_days,
         )
     else:
         strategy = build_ml_strategy(
@@ -2879,7 +2993,7 @@ def _run_ml_experiment(
         universe=ml_spec.universe,
         start_date=ml_spec.start_date,
         end_date=ml_spec.end_date,
-        rebalance_frequency="D",
+        rebalance_frequency=f"{rebalance_frequency_days}D",
         parameters=ml_spec.model.params,
         tags=ml_spec.tags,
         description=ml_spec.description,
@@ -2897,6 +3011,7 @@ def _run_ml_experiment(
 
     # 7. Walk-forward validation — fresh model instance to avoid state contamination
     wf: WalkForwardResult | None = None
+    retrain_frequency_days = ml_spec.retrain_frequency_days
     if val_config.type != "none":
         splits = build_validation_splits(val_config, prices.index)
         if splits:
@@ -2905,6 +3020,7 @@ def _run_ml_experiment(
                     ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal,
                     list(uni_spec.tickers),
                     portfolio_construction=ml_spec.portfolio_construction,
+                    rebalance_frequency_days=rebalance_frequency_days,
                 )
             else:
                 strategy_wf = build_ml_strategy(
@@ -2915,6 +3031,7 @@ def _run_ml_experiment(
                 strategy=strategy_wf,
                 splits=splits,
                 transaction_cost_bps=cost_bps,
+                retrain_frequency_days=retrain_frequency_days,
             )
 
     # 8. Build ExperimentResult
@@ -3045,6 +3162,7 @@ def _run_ml_experiment(
             sr.weights, ml_spec, out_path,
             alloc_research=ml_data.get("alloc_research"),
         )
+    _write_reproducibility_artefacts(ml_data, universe_data, out_path)
 
     # 12. Register
     if output_cfg.get("register", True):

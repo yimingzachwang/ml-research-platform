@@ -1,0 +1,39 @@
+name: showcase_20etfs
+description: >
+  Canonical 20-ETF diversified multi-asset universe for the public Research Showcase.
+  Covers US equity size factors, international equities, the full fixed income
+  spectrum (duration, investment-grade, high-yield, aggregate), commodities,
+  real assets, and seven SPDR sector ETFs. All tickers have continuous history
+  from 2010-01-04 with 0% NaN through 2024-12-31.
+symbols:
+  # US Equity — size and style breadth
+  - SPY     # SPDR S&P 500 — US large-cap beta anchor
+  - QQQ     # Invesco Nasdaq 100 — technology / growth factor
+  - IWM     # iShares Russell 2000 — small-cap / risk appetite
+
+  # International Equity
+  - EFA     # iShares MSCI EAFE — developed international
+  - EEM     # iShares MSCI Emerging Markets — EM equities
+
+  # Fixed Income — duration curve + credit spectrum
+  - TLT     # iShares 20yr Treasury — long-duration rates / risk-off
+  - IEF     # iShares 7-10yr Treasury — intermediate rates
+  - AGG     # iShares Core US Aggregate Bond — broad investment-grade
+  - HYG     # iShares High Yield Corp Bond — credit risk / spread regime
+  - LQD     # iShares IG Corporate Bond — investment-grade credit
+
+  # Commodities
+  - GLD     # SPDR Gold — safe-haven / inflation hedge
+  - DBC     # Invesco DB Commodity — broad commodity cycle
+
+  # Real Assets
+  - VNQ     # Vanguard Real Estate ETF — REIT / real yield / inflation
+
+  # Sectors — SPDR suite (cyclical + defensive)
+  - XLK     # SPDR Technology — growth-sensitive
+  - XLF     # SPDR Financials — rate-sensitive
+  - XLE     # SPDR Energy — commodity-linked
+  - XLV     # SPDR Health Care — defensive
+  - XLI     # SPDR Industrials — economically sensitive
+  - XLP     # SPDR Consumer Staples — counter-cyclical / defensive
+  - XLU     # SPDR Utilities — rate-sensitive / defensive

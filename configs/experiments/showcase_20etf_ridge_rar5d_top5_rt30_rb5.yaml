@@ -1,0 +1,260 @@
+# Canonical Research Showcase Experiment — Phase 1B Update
+#
+# Identity key (unchanged):
+#   showcase  — public platform showcase
+#   20etf     — 20-asset diversified multi-asset universe
+#   ridge     — Ridge regression (L2, alpha=1.0)
+#   rar5d     — risk_adjusted_ranking_target, horizon=5 (5-day Sharpe-like rank)
+#   top5      — top-5 assets by predicted score, equal-weight
+#   rt30      — periodic retraining every 30 trading days
+#   rb5       — portfolio rebalance every 5 trading days (weekly)
+#
+# Phase 1B change (feature library update only):
+#   sharpe_mom_63d  and sharpe_mom_126d  added alongside sharpe_mom_252d.
+#   Feature count: 13 → 15.  No other parameter changed.
+#
+# Run with:
+#   python scripts/run_from_config.py \
+#     configs/experiments/showcase_20etf_ridge_rar5d_top5_rt30_rb5.yaml \
+#     --report --preset canonical
+
+version: "2"
+name: showcase_20etf_ridge_rar5d_top5_rt30_rb5
+description: >
+  Canonical Research Showcase. Cross-sectional factor research across a 20-ETF
+  diversified multi-asset universe spanning US equity, international equity, fixed
+  income (duration curve + credit spectrum), commodities, real assets, and seven
+  SPDR sectors. Ridge regression predicts 5-day risk-adjusted cross-sectional
+  return ranks. Top-5 assets by predicted score held equal-weight. Model retrained
+  every 30 trading days; portfolio rebalanced weekly. Walk-forward validated over
+  2013-2024 with 7 annual out-of-sample splits. 15-feature canonical library
+  (Phase 1B): multi-scale momentum, risk-adjusted momentum at 63d / 126d / 252d,
+  volatility regime, mean-reversion, market structure, and breakout.
+tags:
+  - showcase
+  - canonical
+  - ml
+  - ridge
+  - multi_asset
+  - cross_sectional
+  - panel
+  - risk_adjusted_ranking
+  - periodic_retraining
+  - phase_1b
+
+# ── Universe ──────────────────────────────────────────────────────────────────
+universe:
+  tickers:
+    - SPY    # S&P 500 — US large-cap
+    - QQQ    # Nasdaq 100 — technology / growth
+    - IWM    # Russell 2000 — small-cap
+    - EFA    # MSCI EAFE — developed international
+    - EEM    # MSCI Emerging Markets
+    - TLT    # 20yr Treasury — long-duration rates
+    - IEF    # 7-10yr Treasury — intermediate rates
+    - AGG    # Core US Aggregate Bond
+    - HYG    # High Yield Corp Bond — credit risk
+    - LQD    # IG Corporate Bond — investment-grade credit
+    - GLD    # Gold — safe-haven / inflation
+    - DBC    # DB Commodity — broad commodity cycle
+    - VNQ    # Real Estate ETF — REIT / real yield
+    - XLK    # SPDR Technology
+    - XLF    # SPDR Financials
+    - XLE    # SPDR Energy
+    - XLV    # SPDR Health Care
+    - XLI    # SPDR Industrials
+    - XLP    # SPDR Consumer Staples
+    - XLU    # SPDR Utilities
+
+date_range:
+  start: "2013-01-01"
+  end: "2024-12-31"
+
+# ── Feature engineering ───────────────────────────────────────────────────────
+# 15 features across 4 families, applied independently to each of the 20 assets.
+# One shared Ridge model is fitted on pooled (date × asset) observations.
+#
+# Trend (9):     multi-scale momentum, trend quality, breakout, risk-adjusted momentum
+# Volatility (2): realised vol, vol compression regime
+# Mean-Reversion (2): price z-score, drawdown recovery distance
+# Market Structure (2): rolling market beta
+#
+# Phase 1B additions (2):
+#   sharpe_mom_63d  — 63d return / trailing vol (short-horizon efficiency)
+#   sharpe_mom_126d — 126d return / trailing vol (medium-horizon efficiency)
+
+features:
+  ticker: SPY  # template ticker — ignored in panel mode; features built for all 20 assets
+  entries:
+
+    # --- Trend: multi-scale momentum ---
+    - name: mom_5
+      type: momentum
+      params:
+        lookback: 5          # 1-week return — short-horizon signal
+
+    - name: mom_20
+      type: momentum
+      params:
+        lookback: 20         # 1-month return — short momentum
+
+    - name: mom_60
+      type: momentum
+      params:
+        lookback: 60         # 3-month return — intermediate momentum
+
+    - name: mom_252
+      type: momentum
+      params:
+        lookback: 252        # 12-month return — long-horizon trend
+
+    # --- Volatility ---
+    - name: vol_21
+      type: rolling_volatility
+      params:
+        window: 21           # 1-month realised volatility — risk regime indicator
+
+    # --- Mean-Reversion ---
+    - name: zscore_20
+      type: rolling_zscore
+      params:
+        window: 20           # Price z-score relative to recent distribution
+
+    # --- Trend quality ---
+    - name: trend_20
+      type: trend_strength
+      params:
+        window: 20           # R² of linear price fit — directional consistency
+
+    # --- Phase H-1: economically interpretable expansion ---
+    - name: trend_persist_20d
+      type: trend_persistence
+      params:
+        window: 20           # Fraction of days in positive trend — trend breadth
+
+    - name: breakout_63d
+      type: breakout_strength
+      params:
+        window: 63           # Magnitude of breakout from recent range
+
+    - name: drawdown_dist_252d
+      type: drawdown_distance
+      params:
+        window: 252          # Distance from rolling 252-day maximum — recovery signal
+
+    - name: vol_compress_21_63
+      type: vol_compression
+      params:
+        short_window: 21     # Short-run vol / long-run vol — compression regime
+        long_window: 63
+
+    - name: beta_60d
+      type: rolling_beta
+      params:
+        window: 60           # 60-day rolling beta vs SPY — systematic exposure
+        market_ticker: SPY
+
+    # --- Phase 1B: risk-adjusted momentum at three horizons ---
+    - name: sharpe_mom_63d
+      type: risk_adjusted_momentum
+      params:
+        mom_window: 63       # 63-day return / trailing vol — short-horizon efficiency
+        vol_window: 63
+
+    - name: sharpe_mom_126d
+      type: risk_adjusted_momentum
+      params:
+        mom_window: 126      # 126-day return / trailing vol — medium-horizon efficiency
+        vol_window: 63
+
+    - name: sharpe_mom_252d
+      type: risk_adjusted_momentum
+      params:
+        mom_window: 252      # 252-day return / trailing vol — long-horizon efficiency
+        vol_window: 63
+
+# ── Label ─────────────────────────────────────────────────────────────────────
+# Cross-sectional rank of 5-day risk-adjusted forward return (Sharpe-like ratio)
+# within the 20-asset universe. Assets ranked by forward_return / realized_vol.
+# Minimum meaningful horizon = 2 (rolling(5).std() uses ddof=1, valid at h=5).
+labels:
+  type: risk_adjusted_ranking_target
+  params:
+    horizon: 5               # 5 trading days (~1 week) — coherent with rb5 rebalance
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+# Ridge (L2) regression. Conservative regularisation. All 15 features retain
+# non-zero, stable coefficients across every walk-forward fold — no sparsity
+# artifacts. Produces the richest coefficient-evolution and IC-stability diagnostics.
+model:
+  type: RidgeRegression
+  params:
+    alpha: 1.0               # Conservative L2 shrinkage — recommended starting point
+
+# ── Signal ────────────────────────────────────────────────────────────────────
+# Select top-5 assets by predicted risk-adjusted rank. Equal weight = 1/5 = 20%
+# per asset. 5/20 = 25% concentration — top-quartile selection rule.
+signal:
+  type: top_n
+  params:
+    n: 5
+
+# ── Walk-forward validation ───────────────────────────────────────────────────
+# Rolling 48-month training window, 12-month test window.
+# 7 annual out-of-sample splits: test years 2017, 2018, 2019, 2020, 2021, 2022, 2023.
+# retrain_frequency_days=30: model refitted every 30 trading days within each
+# test split using a rolling window matching the outer 48-month training width.
+# Leakage guarantee: each retrain window ends strictly before the retrain date.
+validation:
+  type: rolling
+  parameters:
+    train_months: 48         # 4-year rolling training window
+    test_months: 12          # 1-year out-of-sample test window
+    gap_days: 0
+    retrain_frequency_days: 30  # Periodic retraining every 30 trading days
+
+# ── Execution ─────────────────────────────────────────────────────────────────
+# rebalance_frequency_days=5: portfolio reconstructed every 5 trading days (~weekly).
+# Coherent with horizon=5: predict which assets rank best over the next week,
+# rebalance weekly. transaction_cost_bps=5: 5bp one-way (10bp round-trip), standard
+# for institutional ETF trading.
+execution:
+  transaction_cost_bps: 5.0
+  rebalance_frequency_days: 5  # Weekly rebalance — matched to 5-day label horizon
+
+# ── Portfolio construction ────────────────────────────────────────────────────
+# Equal-weight across top-5 selected assets. Removes position-sizing ambiguity:
+# the model's contribution is cross-sectional ranking, not allocation magnitude.
+portfolio_construction:
+  weighting:
+    scheme: equal_weight
+    prediction_normalization: none
+    temperature: null
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output:
+  base_dir: results/experiments/showcase_20etf_ridge_rar5d_top5_rt30_rb5
+  registry_path: results/experiments/registry.json
+  register: true
+  save_plots: true
+
+# ── Report metadata ───────────────────────────────────────────────────────────
+metadata:
+  report_title: "Research Showcase: 20-ETF Cross-Sectional Factor Research"
+  report_subtitle: >
+    Ridge regression predicts 5-day risk-adjusted cross-sectional return ranks
+    across a 20-ETF diversified multi-asset universe. Top-5 equal-weight,
+    weekly rebalance, 30-day periodic retraining. Walk-forward validated 2013-2024.
+    15-feature canonical library including risk-adjusted momentum at 63d, 126d, 252d.
+  universe_ref: showcase_20etfs
+  universe_size: 20
+  model_id: ridge_alpha1
+  label_id: risk_adjusted_ranking_target_h5
+  signal_id: top5_equal_weight
+  retrain_frequency_days: 30
+  rebalance_frequency_days: 5
+  n_walk_forward_splits: 7
+  showcase: true
+  public: true
+  feature_count: 15
+  phase: "1B"

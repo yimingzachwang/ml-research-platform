@@ -1,0 +1,273 @@
+# Registry of supported feature types.
+# Source of truth: src/experiments/ml_config._VALID_FEATURE_TYPES (19 types)
+# required_params must match get_feature_required_params() exactly.
+# This file must stay in sync with get_valid_feature_types().
+#
+# IMPORTANT: 8 types appear in src/features/families.FEATURE_FAMILIES but are NOT
+# in _VALID_FEATURE_TYPES and are NOT schema-valid in the current engine:
+#   cross_sectional_rank, ewm_volatility, relative_momentum, rolling_kurtosis,
+#   rolling_minmax, rolling_rank, sma_crossover, vol_expansion
+# These are intentionally absent from this registry.
+# See tests/agent/test_registry_consistency.py: test_unimplemented_family_types_absent.
+#
+# Also absent: compute_returns has no required params but is in the registry below.
+# It IS in _VALID_FEATURE_TYPES but is NOT in FEATURE_FAMILIES (families.py).
+
+bollinger_distance:
+  display_name: Bollinger Band Distance
+  family: Mean-Reversion
+  description: Distance of the current price from the Bollinger Band midline, normalised by band width. Captures mean-reversion pressure.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 20
+  data_requirements:
+    - price_series
+  notes: ""
+
+breakout_strength:
+  display_name: Breakout Strength
+  family: Trend
+  description: Measures the magnitude of a price breakout relative to recent range. High values indicate strong directional momentum following a range compression.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 20
+  data_requirements:
+    - price_series
+  notes: ""
+
+compute_returns:
+  display_name: Computed Returns
+  family: null
+  description: Simple period-over-period returns. A basic feature encoding raw price change. Present in _VALID_FEATURE_TYPES but not assigned to a family in families.py.
+  required_params: []
+  optional_params: {}
+  default_params: {}
+  data_requirements:
+    - price_series
+  notes: >
+    No required params. Returns are computed at the series native frequency.
+    Not listed in FEATURE_FAMILIES but is a valid engine feature type.
+
+downside_volatility:
+  display_name: Downside Volatility
+  family: Volatility
+  description: Rolling standard deviation of negative returns only. Captures tail-risk and drawdown risk separately from upside volatility.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 21
+  data_requirements:
+    - price_series
+  notes: ""
+
+drawdown_distance:
+  display_name: Drawdown Distance
+  family: Mean-Reversion
+  description: Distance from the rolling maximum (current drawdown depth). Captures recovery potential and stress state of the price series.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 63
+  data_requirements:
+    - price_series
+  notes: ""
+
+ema:
+  display_name: Exponential Moving Average
+  family: Trend
+  description: Exponential moving average of price. Responds faster to recent price changes than SMA. The span parameter controls the decay rate.
+  required_params:
+    - span
+  optional_params: {}
+  default_params:
+    span: 21
+  data_requirements:
+    - price_series
+  notes: >
+    Uses span (half-life in days) not window. span=21 ~ monthly decay.
+
+momentum:
+  display_name: Price Momentum
+  family: Trend
+  description: Log-return over a trailing lookback window. Standard cross-sectional momentum signal. Typically used with 252-day (12-month) lookback.
+  required_params:
+    - lookback
+  optional_params: {}
+  default_params:
+    lookback: 252
+  data_requirements:
+    - price_series
+  notes: ""
+
+risk_adjusted_momentum:
+  display_name: Risk-Adjusted Momentum
+  family: Trend
+  description: Momentum divided by trailing volatility over the same window. Normalises momentum for differences in realised volatility across assets.
+  required_params:
+    - mom_window
+  optional_params: {}
+  default_params:
+    mom_window: 126
+  data_requirements:
+    - price_series
+  notes: ""
+
+rolling_autocorrelation:
+  display_name: Rolling Autocorrelation
+  family: Market Structure
+  description: First-order autocorrelation of returns over a trailing window. Positive = mean-following, negative = mean-reverting regime.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 21
+  data_requirements:
+    - price_series
+  notes: ""
+
+rolling_beta:
+  display_name: Rolling Beta
+  family: Market Structure
+  description: Trailing regression beta of the asset against a market index. Measures systematic risk exposure over time.
+  required_params:
+    - window
+  optional_params:
+    market_ticker:
+      type: str
+      notes: >
+        Market index ticker. Defaults to SPY if not provided (see ml_factory.py:178).
+        Future resolver logic should inject the correct market ticker based on the
+        selected universe. Phase 1 must not change this behaviour.
+  default_params:
+    window: 63
+    market_ticker: SPY
+  data_requirements:
+    - price_series
+    - market_index_series
+  notes: >
+    market_ticker currently defaults to SPY in ml_factory.py:178 if not provided.
+    A graceful fallback (NaN series) fires if the market ticker is absent from the
+    prices DataFrame. Future resolver logic should inject the correct market_ticker
+    based on the selected universe. Phase 1 does not change this behaviour.
+
+rolling_skewness:
+  display_name: Rolling Skewness
+  family: Market Structure
+  description: Third moment of the return distribution over a trailing window. Negative skew indicates left-tail risk; positive skew indicates right-tail potential.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 63
+  data_requirements:
+    - price_series
+  notes: ""
+
+rolling_volatility:
+  display_name: Rolling Volatility
+  family: Volatility
+  description: Annualised standard deviation of returns over a trailing window. The standard realised volatility estimate.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 21
+  data_requirements:
+    - price_series
+  notes: ""
+
+rolling_zscore:
+  display_name: Rolling Z-Score
+  family: Mean-Reversion
+  description: Z-score of the current return relative to the trailing rolling mean and standard deviation. Captures statistical deviation from trend.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 21
+  data_requirements:
+    - price_series
+  notes: ""
+
+sma:
+  display_name: Simple Moving Average
+  family: Trend
+  description: Simple moving average of price over a trailing window. Lagging trend indicator.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 21
+  data_requirements:
+    - price_series
+  notes: ""
+
+trend_persistence:
+  display_name: Trend Persistence
+  family: Trend
+  description: Fraction of trailing days on which the asset was in a positive trend. Measures how sustained a directional move has been.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 63
+  data_requirements:
+    - price_series
+  notes: ""
+
+trend_strength:
+  display_name: Trend Strength
+  family: Trend
+  description: R-squared of a linear regression of price on time over a trailing window. Captures how well current price fits a linear trend.
+  required_params:
+    - window
+  optional_params: {}
+  default_params:
+    window: 63
+  data_requirements:
+    - price_series
+  notes: ""
+
+vol_compression:
+  display_name: Volatility Compression
+  family: Volatility
+  description: Ratio of short-window to long-window volatility. Values below 1.0 indicate current volatility compression relative to recent history (potential breakout setup).
+  required_params:
+    - long_window
+    - short_window
+  optional_params: {}
+  default_params:
+    long_window: 63
+    short_window: 21
+  data_requirements:
+    - price_series
+  notes: >
+    Two required params (not one). short_window < long_window enforced by the engine.
+
+vol_of_vol:
+  display_name: Volatility of Volatility
+  family: Volatility
+  description: Standard deviation of rolling volatility estimates. Measures regime instability in the volatility process itself.
+  required_params: []
+  optional_params: {}
+  default_params: {}
+  data_requirements:
+    - price_series
+  notes: "No required params. Uses internal rolling window."
+
+vol_percentile:
+  display_name: Volatility Percentile
+  family: Volatility
+  description: Historical percentile rank of current volatility relative to the full available history. Values near 1.0 indicate historically high volatility.
+  required_params: []
+  optional_params: {}
+  default_params: {}
+  data_requirements:
+    - price_series
+  notes: "No required params. Uses full available history for the percentile rank."

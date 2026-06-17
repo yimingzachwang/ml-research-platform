@@ -1,7 +1,15 @@
 """Feature engineering layer — pure, deterministic transformations."""
 
 from src.features.interfaces import Feature, FeaturePipeline
-from src.features.momentum import momentum, momentum_20d, momentum_60d, momentum_252d
+from src.features.momentum import (
+    momentum,
+    momentum_20d,
+    momentum_60d,
+    momentum_252d,
+    risk_adjusted_momentum,
+    sharpe_mom_63d,
+    sharpe_mom_126d,
+)
 from src.features.normalization import minmax_normalize, robust_normalize, zscore_normalize
 from src.features.placeholders import NoOpFeature, NoOpFeaturePipeline
 from src.features.returns import compute_cumulative_returns, compute_log_returns, compute_returns
@@ -37,6 +45,9 @@ __all__ = [
     "momentum_20d",
     "momentum_60d",
     "momentum_252d",
+    "risk_adjusted_momentum",
+    "sharpe_mom_63d",
+    "sharpe_mom_126d",
     # volatility
     "rolling_volatility",
     "ewm_volatility",

@@ -1,0 +1,102 @@
+# Registry of supported ML model types.
+# Source of truth: src/experiments/ml_config._VALID_MODEL_TYPES
+# This file must stay in sync with get_valid_model_types().
+# Do NOT add models that are not in _VALID_MODEL_TYPES — doing so will
+# cause test_registry_consistency.py to fail.
+
+LinearRegression:
+  display_name: Linear Regression (OLS)
+  description: Ordinary least squares regression. No regularisation. Fits a linear mapping from features to the label. Best used as a baseline.
+  supported: true
+  default_params: {}
+  tunable_params: {}
+  notes: >
+    No hyperparameters. Prone to overfitting in high-dimensional feature spaces.
+    Use RidgeRegression as the default regularised alternative.
+
+RidgeRegression:
+  display_name: Ridge Regression (L2)
+  description: L2-regularised linear regression. Shrinks coefficients toward zero without zeroing them. The default regularised model for multi-feature experiments.
+  supported: true
+  default_params:
+    alpha: 1.0
+  tunable_params:
+    alpha:
+      type: float
+      range: [0.01, 100.0]
+      change_path: model.params.alpha
+      notes: Shrinkage strength. Larger values = more regularisation.
+  notes: >
+    Phase 2.5 allocation research found alpha=0.5 introduces prediction compression
+    relative to equal-weight when the signal-to-noise ratio is low. Default alpha=1.0
+    is conservative. Recommended starting point for most experiments.
+
+LassoRegression:
+  display_name: Lasso Regression (L1)
+  description: L1-regularised linear regression. Produces sparse solutions by driving some coefficients to exactly zero. Useful for feature selection.
+  supported: true
+  default_params:
+    alpha: 1.0
+    max_iter: 1000
+  tunable_params:
+    alpha:
+      type: float
+      range: [0.01, 100.0]
+      change_path: model.params.alpha
+      notes: Sparsity strength. Larger values = more coefficients zeroed.
+    max_iter:
+      type: int
+      range: [500, 10000]
+      change_path: model.params.max_iter
+      notes: Maximum solver iterations. Increase if convergence warnings appear.
+  notes: >
+    Coordinate descent solver. May not converge at default max_iter=1000 on
+    large feature sets; increase to 5000+ if ConvergenceWarning fires.
+
+ElasticNetRegression:
+  display_name: Elastic Net Regression (L1 + L2)
+  description: Combined L1/L2 regularisation. Balances sparsity (Lasso) and coefficient shrinkage (Ridge) via the l1_ratio mixing parameter.
+  supported: true
+  default_params:
+    alpha: 1.0
+    l1_ratio: 0.5
+    max_iter: 1000
+  tunable_params:
+    alpha:
+      type: float
+      range: [0.01, 100.0]
+      change_path: model.params.alpha
+    l1_ratio:
+      type: float
+      range: [0.0, 1.0]
+      change_path: model.params.l1_ratio
+      notes: 0.0 = pure Ridge, 1.0 = pure Lasso.
+    max_iter:
+      type: int
+      range: [500, 10000]
+      change_path: model.params.max_iter
+  notes: >
+    Use when you want both sparsity and stable shrinkage. l1_ratio=0.5 is a
+    neutral starting point.
+
+LogisticRegression:
+  display_name: Logistic Regression (Classification)
+  description: Binary classification model. Predicts direction (up/down) rather than magnitude. Use with binary_direction labels only.
+  supported: true
+  default_params:
+    C: 1.0
+    max_iter: 1000
+  tunable_params:
+    C:
+      type: float
+      range: [0.001, 100.0]
+      change_path: model.params.C
+      notes: Inverse regularisation strength. Larger C = less regularisation.
+    max_iter:
+      type: int
+      range: [500, 10000]
+      change_path: model.params.max_iter
+  notes: >
+    Compatible only with binary_direction labels. The signal layer must produce
+    binary or threshold-based weights when this model is used.
+    Not compatible with forward_returns, volatility_target, or ranking_target labels.

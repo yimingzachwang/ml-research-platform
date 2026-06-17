@@ -1,0 +1,71 @@
+# Preset: Canonical Multi-Asset ETF Research
+# Formalises the multi-asset ETF factor research template used in Phase 2/3.
+# All values reference registry entries. Do not set values not in the registry.
+
+name: canonical_multi_asset_etf
+display_name: Canonical Multi-Asset ETF Research
+description: >
+  Standard multi-asset ETF factor research setup. 13-ETF universe spanning
+  US equity, international equity, rates, commodities, sectors, and credit.
+  Rolling walk-forward validation. Cross-sectional ranking label with top-N
+  signal. Ridge regression with equal-weight portfolio construction.
+  Use as the default starting point for new multi-asset experiments.
+asset_class: multi_asset
+universe: canonical_multi_asset_etfs  # ref: config/registry/universes.yaml
+frequency: monthly
+
+features:
+  - type: momentum
+    params:
+      lookback: 252
+  - type: rolling_volatility
+    params:
+      window: 63
+  - type: trend_strength
+    params:
+      window: 63
+  - type: rolling_zscore
+    params:
+      window: 21
+  - type: vol_percentile
+
+labels:
+  type: forward_returns     # ref: config/registry/labels.yaml
+  params:
+    horizon: 21
+
+model:
+  type: RidgeRegression     # ref: config/registry/models.yaml
+  params:
+    alpha: 1.0
+
+signal:
+  type: top_n               # ref: config/registry/signals.yaml (requires_multi_asset: true)
+  params:
+    n: 3
+
+validation:
+  type: rolling             # ref: config/registry/validation.yaml
+  params:
+    train_months: 36
+    test_months: 6
+    gap_days: 0
+
+portfolio_construction:
+  weighting:
+    scheme: equal_weight    # ref: config/registry/portfolio_construction.yaml
+    prediction_normalization: none
+
+transaction_cost_bps: 10
+benchmark: SPY
+
+diagnostics:
+  - split_metrics
+  - feature_importance
+
+notes: >
+  This preset is the Phase 2/3 baseline. For cross-sectional ranking
+  experiments, replace the label with ranking_target and the signal with top_n
+  or long_short. For return-prediction experiments, this configuration is
+  production-ready. The rolling_beta feature can be added later with an explicit
+  market_ticker parameter.

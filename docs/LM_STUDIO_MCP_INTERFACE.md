@@ -247,6 +247,16 @@ When calling the LLM-backed tools (`run_experiment_review`,
 | `get_experiment_metrics` | **Authoritative** metrics from artefacts (Sharpe, OOS, drawdown) | no | no |
 | `compare_experiment_metrics` | Compare two experiments using **real** artefact metrics | no | no |
 | `inspect_comparison_evidence` | Read-only summary of a persisted comparison evidence record | no | no |
+| `rank_experiments` | Rank experiment variants by Sharpe, OOS Sharpe, drawdown, or robustness score | no | no |
+| `summarise_experiment_family` | Aggregate metrics, failure modes, comparisons, and lessons for an experiment prefix | no | no |
+| `check_research_idea_history` | Scan comparison evidence for similar previously-tested changes (advisory) | no | no |
+| `propose_research_plan` | Governed research plan from existing evidence (advisory; no drafts/execution) | no | no |
+| `inspect_experiment_config` | Compact config summary (model type, features, changeable paths) | no | no |
+| `list_changeable_config_fields` | All field paths accepted by `generate_config_change_draft` | no | no |
+| `list_available_features` | Schema-authoritative feature types (no invented names) | no | no |
+| `list_supported_models` | The 5 schema-valid model types | no | no |
+| `generate_config_change_draft` | Deterministic multi-change draft (features, params, model) | no | draft + event |
+| `generate_parameter_change_draft` | Draft from one explicit user-requested scalar `set` | no | draft + event |
 
 Governance built into the tools:
 
@@ -517,6 +527,169 @@ Example LM Studio prompts:
 Set model.params.alpha to 2 for canonical_ml_showcase_v9.
 What is the Sharpe and OOS Sharpe for canonical_ml_showcase_v9_v2?
 Did canonical_ml_showcase_v9_v2 improve over canonical_ml_showcase_v9?
+```
+
+## Experiment intelligence — reasoning across accumulated experiments
+
+Four read-only tools let the model reason across the full accumulated
+experiment history — not just inspect one experiment or one comparison.
+All four call no LLM, execute nothing, approve nothing, and read only
+authoritative artefact metrics and persisted comparison evidence.
+
+### Intervention taxonomy
+
+Zeto classifies every config change (or free-text `tested_change` field
+from a comparison evidence record) into a standardised intervention type:
+
+| Type | Examples |
+|---|---|
+| `regularisation_change` | `model.params.alpha 0.5 → 2.0` |
+| `feature_addition` | `features.entries add risk_adjusted_momentum_20` |
+| `feature_removal` | `features.entries remove mom_60` |
+| `feature_replacement` | `features.entries replace mom_20 with sma_20` |
+| `model_change` | `model.type RidgeRegression → LassoRegression` |
+| `validation_change` | `n_splits` or walk-forward window change |
+| `signal_change` | momentum/mean-reversion signal type change |
+| `execution_cost_change` | slippage, commission, or turnover parameter |
+| `portfolio_construction_change` | position sizing or allocation weight |
+| `unknown_change` | unclassifiable free text |
+
+Classification is deterministic: structured `(field_path, operation)` pairs
+always produce `confidence=high`; free-text keyword matching produces
+`high`, `medium`, or `low`.  The taxonomy is stored in comparison evidence
+records when `tested_change` is provided to `compare_experiment_metrics`.
+
+### Robustness ranking — `rank_experiments`
+
+Ranks experiment variants by a single chosen metric using real artefact
+data (no RAG, no LLM, no invented values).
+
+Supported ranking metrics:
+
+| Metric | Meaning |
+|---|---|
+| `sharpe_ratio` | Full-period Sharpe from `metrics.json` |
+| `mean_oos_sharpe` | Mean OOS Sharpe across walk-forward splits |
+| `max_drawdown_pct` | Max drawdown (higher = less negative = better) |
+| `robustness_score` | Composite: see formula below |
+
+**robustness_score formula** (transparent, documented in every response):
+
+```
+0.5 × mean_oos_sharpe
++ 0.3 × sharpe_ratio
++ 0.2 × (max_drawdown_pp / 100)
+− Σ failure_mode_penalty
+    catastrophic_split     → −0.30
+    poor_oos_consistency   → −0.20
+    all others             → −0.10 each
+```
+
+Missing metrics contribute 0; `missing_metrics` is listed per-experiment.
+
+```json
+{
+  "experiment_name": "canonical_ml_showcase_v11",
+  "rank": 1,
+  "sharpe_ratio": 0.681,
+  "mean_oos_sharpe": -0.253,
+  "max_drawdown_pct": -34.1,
+  "failure_modes": ["poor_oos_consistency"],
+  "robustness_score": -0.422,
+  "metrics_path": "results/experiments/canonical_ml_showcase_v11/metrics.json"
+}
+```
+
+### Experiment family summary — `summarise_experiment_family`
+
+Aggregates across all experiments whose name starts with a given prefix.
+Returns:
+
+- experiment count and names;
+- best Sharpe, best OOS Sharpe, and lowest drawdown experiments;
+- common failure modes (appearing in ≥ 50 % of experiments);
+- comparison evidence highlights (tested changes + metric deltas);
+- intervention types tested across the family;
+- deterministic lessons derived from metrics and comparison deltas
+  (no LLM — rules such as "Sharpe/OOS tradeoff observed" or "OOS
+  instability persists").
+
+### Repeated / failed idea detection — `check_research_idea_history`
+
+Scans persisted comparison evidence records by keyword relevance and
+returns:
+
+- matched `tested_change` / `research_question` / `conclusion` text;
+- metric deltas (Sharpe, OOS Sharpe) for each match;
+- a recommendation per match:
+
+| Recommendation | Meaning |
+|---|---|
+| `do_not_repeat_exact_change` | Prior evidence shows harm or no improvement |
+| `consider_with_caution` | Prior evidence is promising but mixed |
+| `insufficient_data` | Metrics were missing in the prior comparison |
+
+The tool is **advisory only** — it warns but does not block the user from
+proceeding.  It does not call a LLM and does not make authoritative
+performance claims.
+
+### Governed research plan proposal — `propose_research_plan`
+
+Derives a compact, ordered plan (up to `max_steps` steps) from:
+
+- common failure modes across the experiment family;
+- intervention types already tested (marked `already_tested`);
+- intervention types not yet tested (marked `candidate`).
+
+Each step includes a research question, intervention type, suggested
+change, supporting evidence, and an optional caveat.
+
+**This tool does not generate drafts, approve, render, or execute
+anything.** To act on a step, use `generate_config_change_draft` or
+`generate_parameter_change_draft`.
+
+```json
+{
+  "step": 1,
+  "question": "Does stronger regularisation reduce OOS instability?",
+  "intervention_type": "regularisation_change",
+  "status": "candidate",
+  "suggested_change": "Increase model.params.alpha to reduce overfitting across splits.",
+  "evidence": "Triggered by common failure modes: ['poor_oos_consistency'].",
+  "caveat": "Higher alpha may reduce headline Sharpe."
+}
+```
+
+### Routing for intelligence questions
+
+| User question | Tool |
+|---|---|
+| "Which experiment is best?" / "Rank experiments" | `rank_experiments` |
+| "What have we learned so far?" / "Summarise family" | `summarise_experiment_family` |
+| "Have we tested this before?" / "Idea history" | `check_research_idea_history` |
+| "What should we try next?" / "Propose plan" | `propose_research_plan` |
+| "What is the Sharpe for X?" | `get_experiment_metrics` |
+| "Did X improve over Y?" | `compare_experiment_metrics` |
+| "What did we learn from X vs Y?" | `inspect_comparison_evidence` |
+| "Set alpha to 2 for X" | `generate_parameter_change_draft` |
+| "Add/remove/replace a feature in X" | `generate_config_change_draft` |
+
+Rules:
+- Rankings and conclusions come from real artefact metrics only — RAG and
+  semantic memory are **supporting evidence only**, never proof of
+  performance.
+- `propose_research_plan` output is advisory; it does not authorise
+  execution, approval, or rendering.
+- Never use `retrieve_research_memory` or `semantic_retrieve_research_memory`
+  to answer performance or ranking questions.
+
+Example LM Studio prompts:
+
+```text
+Rank all canonical_ml_showcase experiments by robustness_score.
+Summarise what we have learned from the canonical_ml_showcase family.
+Have we already tested adding risk_adjusted_momentum features?
+Propose a research plan for canonical_ml_showcase targeting OOS stability.
 ```
 
 ## Preflight: `check_research_workflow_state`

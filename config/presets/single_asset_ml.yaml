@@ -1,0 +1,68 @@
+# Preset: Single-Asset ML Showcase
+# Wraps the canonical SPY-based ML showcase concept used in historical experiments.
+# Compatible only with single-asset signals (sign, threshold).
+
+name: single_asset_ml
+display_name: Single-Asset ML Showcase (SPY)
+description: >
+  Canonical single-asset ML research setup. Single SPY universe with momentum,
+  volatility, and mean-reversion features. Rolling walk-forward validation.
+  Ridge regression with sign signal. No portfolio construction (single asset).
+  Mirrors the canonical_ml_showcase*.yaml experiment family.
+asset_class: equity_index
+universe: single_asset_spy    # ref: config/registry/universes.yaml
+frequency: monthly
+
+features:
+  - type: momentum
+    params:
+      lookback: 252
+  - type: rolling_volatility
+    params:
+      window: 21
+  - type: rolling_zscore
+    params:
+      window: 21
+  - type: trend_strength
+    params:
+      window: 63
+  - type: vol_percentile
+
+labels:
+  type: forward_returns         # ref: config/registry/labels.yaml
+  params:
+    horizon: 21
+
+model:
+  type: RidgeRegression         # ref: config/registry/models.yaml
+  params:
+    alpha: 1.0
+
+signal:
+  type: sign                    # ref: config/registry/signals.yaml (requires_multi_asset: false)
+
+validation:
+  type: rolling                 # ref: config/registry/validation.yaml
+  params:
+    train_months: 36
+    test_months: 6
+    gap_days: 0
+
+portfolio_construction:
+  weighting:
+    scheme: equal_weight
+    prediction_normalization: none
+
+transaction_cost_bps: 5
+benchmark: SPY
+
+diagnostics:
+  - split_metrics
+  - feature_importance
+
+notes: >
+  This preset is the Phase 1/2 baseline for single-asset ML research.
+  Do NOT use cross-sectional signals (top_n, long_short, normalize) or
+  cross-sectional labels (ranking_target) with this preset — they require
+  a multi-asset universe. For time-series vs. cross-sectional comparison,
+  use this preset alongside canonical_multi_asset_etf.

@@ -30,6 +30,16 @@ def momentum_252d(close: pd.Series) -> pd.Series:
     return momentum(close, 252)
 
 
+def sharpe_mom_63d(close: pd.Series) -> pd.Series:
+    """3-month risk-adjusted momentum (63d return / 63d annualised vol)."""
+    return risk_adjusted_momentum(close, mom_window=63)
+
+
+def sharpe_mom_126d(close: pd.Series) -> pd.Series:
+    """6-month risk-adjusted momentum (126d return / 63d annualised vol)."""
+    return risk_adjusted_momentum(close, mom_window=126)
+
+
 def risk_adjusted_momentum(
     close: pd.Series,
     mom_window: int = 252,

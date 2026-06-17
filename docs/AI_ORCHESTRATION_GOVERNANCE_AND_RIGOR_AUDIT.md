@@ -6,6 +6,18 @@
 
 ---
 
+> **Status update (2026-06-10):**
+> The governance boundaries documented here remain fully in force. Since this audit was
+> written, a formal research-design planning layer (`src/agent/`) has been added to the
+> platform through Phases 1–4B. It includes `ResearchSpec`, deterministic resolution,
+> compatibility checking, `ExperimentPlan`, plan critique, validated draft generation, and
+> natural-language workflow. All new capabilities inherit the same governance philosophy:
+> drafts require validation and human approval before render or execution;
+> `execution_performed` and `draft_approved` are always `false` from the agent layer.
+> See [`docs/agent_architecture.md`](agent_architecture.md) for the current full picture.
+
+---
+
 ## 1. Governance Philosophy
 
 The orchestration layer is built around one invariant: **LLM output is advisory and the researcher is the decision-maker.** Every design choice in the system exists to enforce this invariant at multiple levels — prompt, code, schema, and test.

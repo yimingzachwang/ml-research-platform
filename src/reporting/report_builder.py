@@ -294,11 +294,20 @@ def _copy_figures(artefacts: ExperimentArtefacts) -> list[tuple[str, Path]]:
     if not artefacts.source_figures:
         return []
     artefacts.figure_dir.mkdir(parents=True, exist_ok=True)
+    # Build stem→display_name lookup from plot_index when available
+    _display_lookup: dict[str, str] = {}
+    if artefacts.plot_index:
+        for entry in artefacts.plot_index:
+            stem = entry.get("name", "")
+            dn = entry.get("display_name") or stem.replace("_", " ").title()
+            if stem:
+                _display_lookup[stem] = dn
+
     result: list[tuple[str, Path]] = []
     for src_fig in artefacts.source_figures:
         dest = artefacts.figure_dir / src_fig.name
         shutil.copy2(src_fig, dest)
-        display = src_fig.stem.replace("_", " ").title()
+        display = _display_lookup.get(src_fig.stem) or src_fig.stem.replace("_", " ").title()
         result.append((display, dest))
     return result
 

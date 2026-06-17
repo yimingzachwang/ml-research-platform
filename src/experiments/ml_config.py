@@ -50,6 +50,7 @@ _VALID_LABEL_TYPES: frozenset[str] = frozenset({
     "binary_direction",
     "volatility_target",
     "ranking_target",
+    "risk_adjusted_ranking_target",
 })
 
 _VALID_MODEL_TYPES: frozenset[str] = frozenset({
@@ -105,6 +106,7 @@ _LABEL_REQUIRED_PARAMS: dict[str, frozenset[str]] = {
     "binary_direction": frozenset({"horizon"}),
     "volatility_target": frozenset({"horizon"}),
     "ranking_target": frozenset({"horizon"}),
+    "risk_adjusted_ranking_target": frozenset({"horizon"}),
 }
 
 _SIGNAL_REQUIRED_PARAMS: dict[str, frozenset[str]] = {
@@ -116,7 +118,10 @@ _SIGNAL_REQUIRED_PARAMS: dict[str, frozenset[str]] = {
 }
 
 # Panel-only types (require multiple tickers; factory raises "not yet implemented")
-PANEL_LABEL_TYPES: frozenset[str] = frozenset({"ranking_target"})
+PANEL_LABEL_TYPES: frozenset[str] = frozenset({
+    "ranking_target",
+    "risk_adjusted_ranking_target",
+})
 PANEL_SIGNAL_TYPES: frozenset[str] = frozenset({"top_n", "long_short", "normalize"})
 
 _VALID_VALIDATION_TYPES: frozenset[str] = frozenset({"rolling", "expanding", "none"})
@@ -238,6 +243,8 @@ class MLExperimentSpec:
     portfolio_construction: PortfolioConstructionSpec = field(
         default_factory=PortfolioConstructionSpec
     )
+    rebalance_frequency_days: int = 1
+    retrain_frequency_days: int | None = None
     tags: list[str] = field(default_factory=list)
     description: str = ""
 
@@ -252,6 +259,8 @@ class MLExperimentSpec:
             "model": self.model.to_dict(),
             "signal": self.signal.to_dict(),
             "portfolio_construction": self.portfolio_construction.to_dict(),
+            "rebalance_frequency_days": self.rebalance_frequency_days,
+            "retrain_frequency_days": self.retrain_frequency_days,
             "tags": list(self.tags),
             "description": self.description,
         }
@@ -287,6 +296,13 @@ def ml_experiment_hash(spec: MLExperimentSpec) -> str:
         payload["portfolio_construction"] = _json_safe(
             spec.portfolio_construction.to_dict()
         )
+    # Include rebalance_frequency_days only when non-default (1) to preserve
+    # existing experiment hashes.
+    if spec.rebalance_frequency_days != 1:
+        payload["rebalance_frequency_days"] = spec.rebalance_frequency_days
+    # Include retrain_frequency_days only when set (null = legacy path = no hash change).
+    if spec.retrain_frequency_days is not None:
+        payload["retrain_frequency_days"] = spec.retrain_frequency_days
     serialized = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(serialized.encode()).hexdigest()[:12]
 
@@ -361,6 +377,15 @@ def validate_ml_config(cfg: dict[str, Any]) -> None:
                         f"'validation.parameters.{key}' must be a positive integer, "
                         f"got {val!r}."
                     )
+        if isinstance(vparams, dict):
+            retrain_days = vparams.get("retrain_frequency_days")
+            if retrain_days is not None and (
+                not isinstance(retrain_days, int) or retrain_days < 1
+            ):
+                raise ValueError(
+                    f"'validation.parameters.retrain_frequency_days' must be a positive "
+                    f"integer, got {retrain_days!r}."
+                )
 
     # Optional: execution
     execution = cfg.get("execution")
@@ -372,6 +397,12 @@ def validate_ml_config(cfg: dict[str, Any]) -> None:
             raise ValueError(
                 f"'execution.transaction_cost_bps' must be a non-negative number, "
                 f"got {cost!r}."
+            )
+        freq_days = execution.get("rebalance_frequency_days")
+        if freq_days is not None and (not isinstance(freq_days, int) or freq_days < 1):
+            raise ValueError(
+                f"'execution.rebalance_frequency_days' must be a positive integer, "
+                f"got {freq_days!r}."
             )
 
     # Optional: output
@@ -557,12 +588,13 @@ def normalize_ml_config(cfg: dict[str, Any]) -> dict[str, Any]:
 
     # execution
     if "execution" not in out or not isinstance(out["execution"], dict):
-        out["execution"] = {"transaction_cost_bps": 0.0}
+        out["execution"] = {"transaction_cost_bps": 0.0, "rebalance_frequency_days": 1}
     else:
         out["execution"].setdefault("transaction_cost_bps", 0.0)
         out["execution"]["transaction_cost_bps"] = float(
             out["execution"]["transaction_cost_bps"]
         )
+        out["execution"].setdefault("rebalance_frequency_days", 1)
 
     # output
     if "output" not in out or not isinstance(out["output"], dict):
@@ -655,6 +687,12 @@ def build_ml_experiment_spec(cfg: dict[str, Any]) -> MLExperimentSpec:
     portfolio_construction_spec = PortfolioConstructionSpec(weighting=weighting_spec)
 
     dr = cfg["date_range"]
+    rebalance_frequency_days = int(
+        cfg.get("execution", {}).get("rebalance_frequency_days", 1)
+    )
+    vparams = (cfg.get("validation") or {}).get("parameters") or {}
+    retrain_raw = vparams.get("retrain_frequency_days")
+    retrain_frequency_days = int(retrain_raw) if retrain_raw is not None else None
     return MLExperimentSpec(
         name=cfg["name"],
         universe=list(cfg["universe"]["tickers"]),
@@ -665,6 +703,8 @@ def build_ml_experiment_spec(cfg: dict[str, Any]) -> MLExperimentSpec:
         model=model_spec,
         signal=signal_spec,
         portfolio_construction=portfolio_construction_spec,
+        rebalance_frequency_days=rebalance_frequency_days,
+        retrain_frequency_days=retrain_frequency_days,
         tags=list(cfg.get("tags") or []),
         description=cfg.get("description", ""),
     )

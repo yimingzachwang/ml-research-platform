@@ -143,6 +143,8 @@ The FastAPI bridge (`src/api/`) exposes the orchestration layer over HTTP. Route
 
 See [`docs/ai_orchestration/overview.md`](docs/ai_orchestration/overview.md) for design rationale, the session lifecycle model, and the draft approval workflow.
 
+For the current governed AI research agent architecture — including the research-design intelligence core (`src/agent/`), the governance layer (`src/orchestration/`), the MCP tool layer, and their relationship — see [`docs/agent_architecture.md`](docs/agent_architecture.md).
+
 ---
 
 ## Engineering Standards

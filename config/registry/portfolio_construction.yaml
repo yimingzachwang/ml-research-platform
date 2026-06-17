@@ -1,0 +1,87 @@
+# Registry of supported portfolio construction / weighting schemes.
+# Source of truth: src/experiments/ml_config._VALID_WEIGHTING_SCHEMES (3 types)
+# Prediction normalisation entries must match _VALID_PREDICTION_NORMALIZATIONS.
+# Do NOT add schemes that are not in get_valid_weighting_schemes().
+
+weighting_schemes:
+
+  equal_weight:
+    display_name: Equal Weight
+    description: >
+      All selected assets receive equal portfolio weight. Weight = 1 / N where N
+      is the number of assets with non-zero positions. No model prediction
+      magnitude is used beyond the signal selection step.
+    required_params: []
+    optional_params: {}
+    default_params: {}
+    notes: >
+      The default and simplest weighting scheme. WeightingSpec.is_default() returns
+      True only for this scheme. Preserves hashes for experiments created before
+      the portfolio_construction block was added to the config schema.
+
+  confidence_weighted:
+    display_name: Confidence-Weighted
+    description: >
+      Assets are weighted proportional to the magnitude of the model prediction.
+      Higher-conviction (larger absolute prediction) assets receive larger weights.
+      Weights are normalised to sum to 1.0 (long) or to a gross exposure target.
+    required_params: []
+    optional_params:
+      prediction_normalization:
+        type: str
+        allowed: [none, zscore]
+        change_path: portfolio_construction.weighting.prediction_normalization
+        notes: >
+          Pre-weighting normalisation applied to raw predictions before
+          proportional weighting. zscore normalises across assets; none uses
+          raw prediction scale.
+      temperature:
+        type: float
+        change_path: portfolio_construction.weighting.temperature
+        notes: >
+          Softmax temperature applied to normalised predictions before weighting.
+          Lower temperature concentrates weight on top-ranked assets.
+    default_params:
+      prediction_normalization: none
+    notes: >
+      Sensitive to prediction scale. Use prediction_normalization: zscore to
+      remove scale effects and retain only the cross-sectional ranking signal.
+
+  zscore_softmax:
+    display_name: Z-Score Softmax
+    description: >
+      Predictions are z-scored cross-sectionally and then passed through a softmax
+      to produce a smooth probability-like weight distribution. The temperature
+      parameter controls the concentration of the resulting weight distribution.
+    required_params: []
+    optional_params:
+      temperature:
+        type: float
+        change_path: portfolio_construction.weighting.temperature
+        notes: >
+          Softmax temperature. Lower temperature → winner-takes-most allocation.
+          Higher temperature → more equal distribution.
+    default_params:
+      temperature: 1.0
+    notes: >
+      Phase 2.5 research showed that zscore_softmax with moderate temperature
+      reduces the prediction-compression effect seen with confidence_weighted
+      when signal-to-noise ratio is low. Recommended for multi-asset experiments
+      that use Ridge or ElasticNet models.
+
+prediction_normalizations:
+  # Source: get_valid_prediction_normalizations() = {"none", "zscore"}
+
+  none:
+    display_name: No Normalisation
+    description: Raw model predictions are used without any cross-sectional normalisation.
+    notes: Default. Preserves absolute prediction scale.
+
+  zscore:
+    display_name: Z-Score Normalisation
+    description: >
+      Predictions are z-scored cross-sectionally at each time step before
+      being used for weighting. Removes scale effects; retains only relative ranking.
+    notes: >
+      Recommended when using confidence_weighted scheme. Equivalent to
+      rank-normalisation for Gaussian prediction distributions.

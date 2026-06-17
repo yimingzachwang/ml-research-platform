@@ -1,0 +1,137 @@
+# Static compatibility rule definitions.
+# The compatibility critic (Phase 2) will enforce these rules.
+# In Phase 1 this file is loaded and surfaced to the registry loader only.
+# No enforcement logic is implemented in Phase 1.
+#
+# Severity levels:
+#   error   - Experiment cannot run; the engine will raise an error.
+#   warning - Experiment may run but results may be misleading.
+#   info    - Advisory; user should be aware but it is not blocking.
+
+- rule_id: COMPAT_001
+  severity: error
+  description: Cross-sectional signals require a multi-asset universe.
+  applies_when:
+    signal_type:
+      - top_n
+      - long_short
+      - normalize
+  message: >
+    Signal type '{signal_type}' requires a multi-asset universe (>= 2 tickers).
+    The engine raises NotImplementedError for single-asset universes with
+    panel signals.
+  future_checker: check_signal_universe_compatibility
+
+- rule_id: COMPAT_002
+  severity: error
+  description: ranking_target label requires a multi-asset universe.
+  applies_when:
+    label_type:
+      - ranking_target
+  message: >
+    Label type 'ranking_target' requires a multi-asset universe (>= 2 tickers).
+    The engine raises NotImplementedError for single-asset universes with
+    panel labels.
+  future_checker: check_label_universe_compatibility
+
+- rule_id: COMPAT_003
+  severity: warning
+  description: Single-asset universe should not use cross-sectional signals or labels.
+  applies_when:
+    universe_size: 1
+  message: >
+    Universe contains only 1 ticker. Cross-sectional signals (top_n, long_short,
+    normalize) and cross-sectional labels (ranking_target) cannot be used.
+    Use sign or threshold signal with forward_returns or binary_direction label.
+  future_checker: check_single_asset_compatibility
+
+- rule_id: COMPAT_004
+  severity: warning
+  description: rolling_beta should define market_ticker explicitly for non-US-equity universes.
+  applies_when:
+    features_include: rolling_beta
+  message: >
+    Feature 'rolling_beta' defaults to market_ticker=SPY (ml_factory.py:178).
+    For non-US-equity universes, SPY may not be an appropriate market index.
+    Set market_ticker explicitly in the feature params to match the universe.
+    Phase 1 does not change this default — document and warn only.
+  future_checker: check_rolling_beta_market_ticker
+
+- rule_id: COMPAT_005
+  severity: warning
+  description: Walk-forward validation requires sufficient historical data.
+  applies_when:
+    validation_type:
+      - rolling
+      - expanding
+  message: >
+    Rolling/expanding validation requires at least train_months + test_months
+    months of data to produce a single fold. Recommended minimum: 60 months
+    total history for stable parameter estimates.
+  future_checker: check_validation_data_sufficiency
+
+- rule_id: COMPAT_006
+  severity: warning
+  description: High-turnover signals should include transaction cost assumptions.
+  applies_when:
+    signal_type:
+      - top_n
+      - long_short
+      - normalize
+  message: >
+    Cross-sectional signals (top_n, long_short, normalize) typically produce
+    higher portfolio turnover. Ensure transaction_cost_bps is set to a
+    realistic value (>= 5 bps for liquid ETFs). A value of 0 may overstate
+    net returns.
+  future_checker: check_transaction_cost_assumption
+
+- rule_id: COMPAT_007
+  severity: info
+  description: LogisticRegression is only meaningful with binary_direction labels.
+  applies_when:
+    model_type: LogisticRegression
+  message: >
+    LogisticRegression predicts class probabilities, not continuous returns.
+    It is intended for use with binary_direction labels. Using it with
+    forward_returns, volatility_target, or ranking_target labels will produce
+    technically valid results but the output is classification probability,
+    not a return forecast.
+  future_checker: check_logistic_label_compatibility
+
+- rule_id: COMPAT_008
+  severity: info
+  description: confidence_weighted or zscore_softmax schemes are more meaningful with multi-asset universes.
+  applies_when:
+    weighting_scheme:
+      - confidence_weighted
+      - zscore_softmax
+    universe_size: 1
+  message: >
+    Confidence-weighted and zscore_softmax weighting schemes derive value from
+    cross-sectional prediction magnitude. For single-asset universes, these
+    schemes reduce to a scalar scaling of position size and may not add
+    meaningful variation over equal_weight.
+  future_checker: check_weighting_universe_compatibility
+
+- rule_id: COMPAT_009
+  severity: warning
+  description: vol_compression requires short_window < long_window.
+  applies_when:
+    features_include: vol_compression
+  message: >
+    Feature 'vol_compression' requires short_window < long_window.
+    The engine may raise a ValueError if this invariant is violated.
+  future_checker: check_vol_compression_windows
+
+- rule_id: COMPAT_010
+  severity: info
+  description: LassoRegression or ElasticNetRegression may need increased max_iter for convergence.
+  applies_when:
+    model_type:
+      - LassoRegression
+      - ElasticNetRegression
+  message: >
+    Coordinate descent solvers (Lasso, ElasticNet) may not converge at the
+    default max_iter=1000 for large feature sets or high regularisation.
+    Increase max_iter to 5000+ if ConvergenceWarning fires during execution.
+  future_checker: check_solver_convergence_params

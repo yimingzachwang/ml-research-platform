@@ -962,7 +962,7 @@ def plot_feature_heatmap(
     z = z.clip(-3, 3)
 
     n_features = len(z.columns)
-    height = max(FIG_HEIGHT_STANDARD, n_features * 0.42 + 1.2)
+    height = max(FIG_HEIGHT_STANDARD, n_features * 0.52 + 1.5)
     fig, ax = make_figure(height=height, width=FIG_WIDTH_FULL)
 
     Z = z.values.T  # (n_features, n_dates)
@@ -1240,12 +1240,15 @@ def plot_feature_family_ic(
                       color=color, alpha=0.8, linewidth=0)
         for bar, v in zip(bars, values, strict=False):
             if not np.isnan(v) and abs(v) > 0.01:
+                ann_offset = max(0.002, abs(v) * 0.08)
+                # Positive: above bar top. Negative: above zero-axis.
+                y_ann = (v + ann_offset) if v >= 0 else ann_offset
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + (0.003 if v >= 0 else -0.003),
+                    y_ann,
                     f"{v:+.2f}",
                     ha="center",
-                    va="bottom" if v >= 0 else "top",
+                    va="bottom",
                     fontsize=_t.small_annotation,
                     color="#444444",
                 )
@@ -1339,7 +1342,7 @@ def plot_portfolio_concentration(
     ax1.tick_params(labelsize=_t.tick)
     ax1.grid(axis="y", alpha=0.3, linewidth=0.5)
     ax1.set_axisbelow(True)
-    ax1.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left", pad=4)
+    ax1.set_title(title, fontweight="semibold", pad=8)
 
     # Bottom: effective N*
     ax2.fill_between(eff_n_roll.index, eff_n_roll.values,
@@ -1431,20 +1434,22 @@ def plot_ic_by_vol_regime(
             bar_h = ax.bar(x[i] - bar_w / 2, hv, bar_w, color=base_color,
                            alpha=0.85, linewidth=0, label="High-vol" if i == 0 else "")
             if abs(hv) > 0.005:
+                ann_offset_h = max(0.002, abs(hv) * 0.08)
                 ax.text(bar_h[0].get_x() + bar_h[0].get_width() / 2,
-                        hv + (0.003 if hv >= 0 else -0.003),
+                        hv + ann_offset_h,
                         f"{hv:+.3f}", ha="center",
-                        va="bottom" if hv >= 0 else "top", fontsize=_t.small_annotation, color="#333333")
+                        va="bottom", fontsize=_t.small_annotation, color="#333333")
 
         if not np.isnan(lv):
             bar_l = ax.bar(x[i] + bar_w / 2, lv, bar_w, color=base_color,
                            alpha=0.38, linewidth=0.8, edgecolor=base_color,
                            label="Low-vol" if i == 0 else "")
             if abs(lv) > 0.005:
+                ann_offset_l = max(0.002, abs(lv) * 0.08)
                 ax.text(bar_l[0].get_x() + bar_l[0].get_width() / 2,
-                        lv + (0.003 if lv >= 0 else -0.003),
+                        lv + ann_offset_l,
                         f"{lv:+.3f}", ha="center",
-                        va="bottom" if lv >= 0 else "top", fontsize=_t.small_annotation, color="#333333")
+                        va="bottom", fontsize=_t.small_annotation, color="#333333")
 
     ax.axhline(0, color=COLORS["neutral"], linewidth=0.8, linestyle="--", alpha=0.7)
     ax.set_xticks(x)
@@ -1518,10 +1523,12 @@ def plot_prediction_strength(
     horizon = prediction_strength.get("horizon", 21)
     n_obs = prediction_strength.get("n_obs", 0)
 
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(FIG_WIDTH_FULL, 5.5),
-        gridspec_kw={"height_ratios": [1, 1.8]},
+    fig, axes = make_figure(
+        nrows=2,
+        height=6.5,
+        height_ratios=[1, 1.8],
     )
+    ax1, ax2 = axes
 
     # ── Panel 1: mean return bars ──────────────────────────────────────────
     groups = ["top", "mid", "bottom"]
@@ -1538,11 +1545,13 @@ def plot_prediction_strength(
     bars = ax1.bar(x, means, color=bar_colors, alpha=0.82, linewidth=0, width=0.45)
     for bar, val in zip(bars, means, strict=False):
         if not np.isnan(val):
+            # Positive: above bar top. Negative: above zero-axis (not inside bar).
+            y_ann = (val + 0.0003) if val >= 0 else max(0.0003, abs(val) * 0.05)
             ax1.text(
                 bar.get_x() + bar.get_width() / 2,
-                val + (0.0003 if val >= 0 else -0.0003),
+                y_ann,
                 f"{val:.2%}",
-                ha="center", va="bottom" if val >= 0 else "top",
+                ha="center", va="bottom",
                 fontsize=_t.annotation, color="#222222",
             )
 
@@ -1565,7 +1574,7 @@ def plot_prediction_strength(
     spread_str = f"   L/S spread: {ls_spread:.2%}" if ls_spread is not None else ""
     ax1.set_title(
         f"{title}  ({n_obs} monthly obs.  ·  {mono_str}{spread_str})",
-        fontsize=_t.small_label, fontweight="bold", loc="left", pad=4,
+        fontweight="semibold", pad=8,
     )
 
     # ── Panel 2: cumulative return curves ────────────────────────────────
@@ -1612,38 +1621,27 @@ def plot_ranking_geometry(
     ranking_geo: dict,
     title: str = "Cross-Sectional Ranking Geometry",
     save_path: str | None = None,
-) -> plt.Figure:
-    """Four-panel ranking-state diagnostic covering signal geometry and temporal stability.
+) -> dict[str, plt.Figure]:
+    """Four standalone ranking-state diagnostic figures — one per geometry dimension.
 
-    Panel 1 — Prediction Dispersion (S1 + S5 combined):
-        Rolling IQR of predicted scores (left axis, filled) and rolling IC standard
-        deviation (right axis, dashed line).  Distinguishes compression (low IQR) from
-        erraticity (high IC std at near-zero mean IC).
+    Each returned figure is independently presentable with its own axes and title.
 
-    Panel 2 — Score Discrimination (S2):
-        Rolling top-group minus bottom-group score spread.  Near-zero indicates the
-        model assigns similar scores to top and bottom ranked assets — selection is
-        arbitrary.  Sustained positive values confirm ranking conviction.
-
-    Panel 3 — Realized Discrimination (S3):
-        Rolling realized forward-return spread between top- and bottom-ranked asset
-        groups.  Economic confirmation of whether score separation translates to outcome
-        separation.  Pre-cost gross diagnostic — not a deployable return.
-
-    Panel 4 — Rank Persistence (S4):
-        Monthly Spearman autocorrelation of asset score rankings.  High values indicate
-        stable model convictions; near-zero marks regimes where rankings flip arbitrarily
-        each rebalance, amplifying turnover without informational content.
+    Keys in returned dict:
+        "iqr"         — Prediction Dispersion: rolling score IQR + IC std.
+        "spread"      — Score Discrimination: rolling top-vs-bottom score spread.
+        "realized"    — Realized Discrimination: rolling realized return spread.
+        "persistence" — Rank Persistence: monthly Spearman rank autocorrelation.
+        "empty"       — Fallback figure when no data is available (only key present).
 
     Args:
         ranking_geo: Dict produced by _prepare_ranking_geometry() containing optional
                      keys: rolling_score_iqr, rolling_ic_std, rolling_score_spread,
                      rolling_realized_spread, rank_persistence.
-        title:       Figure title (top-left panel header).
-        save_path:   Optional save path.
+        title:       Base title prefix used in each figure's panel header.
+        save_path:   Ignored (orchestrator handles per-figure saving).
 
     Returns:
-        matplotlib Figure.
+        dict[str, plt.Figure] — one figure per available geometry dimension.
     """
     iqr_series = ranking_geo.get("rolling_score_iqr")
     ic_std = ranking_geo.get("rolling_ic_std")
@@ -1654,128 +1652,119 @@ def plot_ranking_geometry(
     def _has(s: object) -> bool:
         return s is not None and hasattr(s, "__len__") and len(s) >= 10  # type: ignore[arg-type]
 
-    # Determine which panels have data
-    panels: list[str] = []
-    if _has(iqr_series):
-        panels.append("iqr")
-    if _has(score_spread):
-        panels.append("spread")
-    if _has(realized_spread):
-        panels.append("realized")
-    if _has(rank_pers):
-        panels.append("persistence")
+    _t = get_typography()
+    _panel_height = FIG_HEIGHT_STANDARD * 1.4
 
-    if not panels:
+    if not any([_has(iqr_series), _has(score_spread), _has(realized_spread), _has(rank_pers)]):
         fig, ax = make_figure(height=FIG_HEIGHT_STANDARD)
         ax.text(0.5, 0.5, "Insufficient ranking geometry data",
                 ha="center", va="center", transform=ax.transAxes,
-                fontsize=get_typography().figure_text, color=COLORS["neutral"])
+                fontsize=_t.figure_text, color=COLORS["neutral"])
         label_axes(ax, title=title)
         fig.tight_layout()
-        if save_path:
-            save_figure(fig, save_path, close=False)
-        return fig
+        return {"empty": fig}
 
-    n = len(panels)
-    height_ratios = [1.5 if p == "iqr" else 1.0 for p in panels]
-    fig_height = FIG_HEIGHT_STANDARD * (0.55 + 0.65 * n)
+    figs: dict[str, plt.Figure] = {}
 
-    fig, axes = plt.subplots(
-        n, 1,
-        figsize=(FIG_WIDTH_FULL, fig_height),
-        sharex=True,
-        gridspec_kw={"height_ratios": height_ratios},
-    )
-    if n == 1:
-        axes = [axes]
+    # ── Figure A: Prediction Dispersion (IQR + IC std) ────────────────────
+    if _has(iqr_series):
+        fig_a, ax_a = make_figure(height=_panel_height)
+        ax_a.fill_between(iqr_series.index, iqr_series.values,  # type: ignore[union-attr]
+                          alpha=0.18, color=COLORS["strategy"])
+        ax_a.plot(iqr_series.index, iqr_series.values,  # type: ignore[union-attr]
+                  linewidth=1.3, color=COLORS["strategy"],
+                  label="Score IQR (63d avg)")
+        ax_a.set_ylabel("Score IQR", fontsize=_t.small_label)
+        ax_a.tick_params(labelsize=_t.tick)
+        ax_a.grid(axis="y", alpha=0.3, linewidth=0.5)
+        ax_a.set_axisbelow(True)
 
-    _t = get_typography()
-    for ax_i, panel in enumerate(panels):
-        ax = axes[ax_i]
+        if _has(ic_std):
+            ax_a2 = ax_a.twinx()
+            ax_a2.plot(ic_std.index, ic_std.values,  # type: ignore[union-attr]
+                       linewidth=1.0, color=COLORS["signal"],
+                       linestyle="--", alpha=0.80, label="IC std (63d)")
+            ax_a2.set_ylabel("IC std", fontsize=_t.colorbar, color=COLORS["signal"])
+            ax_a2.tick_params(labelsize=_t.colorbar, colors=COLORS["signal"])
+            ax_a2.spines["right"].set_visible(True)
+            ax_a2.spines["right"].set_color(COLORS["signal"])
+            ax_a2.spines["right"].set_alpha(0.5)
+            lines1, labs1 = ax_a.get_legend_handles_labels()
+            lines2, labs2 = ax_a2.get_legend_handles_labels()
+            ax_a.legend(lines1 + lines2, labs1 + labs2,
+                        frameon=False, fontsize=_t.legend, loc="upper left")
+        else:
+            ax_a.legend(frameon=False, fontsize=_t.legend)
 
-        if panel == "iqr":
-            # Left axis: rolling IQR
-            ax.fill_between(iqr_series.index, iqr_series.values,  # type: ignore[union-attr]
-                            alpha=0.18, color=COLORS["strategy"])
-            ax.plot(iqr_series.index, iqr_series.values,  # type: ignore[union-attr]
-                    linewidth=1.3, color=COLORS["strategy"],
-                    label="Score IQR (63d avg)")
-            ax.set_ylabel("Score IQR", fontsize=_t.small_label)
-            ax.tick_params(labelsize=_t.tick)
-            ax.grid(axis="y", alpha=0.3, linewidth=0.5)
-            ax.set_axisbelow(True)
-            ax.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left", pad=4)
+        label_axes(ax_a, title="Prediction Dispersion")
+        fig_a.tight_layout()
+        figs["iqr"] = fig_a
 
-            if _has(ic_std):
-                ax2 = ax.twinx()
-                ax2.plot(ic_std.index, ic_std.values,  # type: ignore[union-attr]
-                         linewidth=1.0, color=COLORS["signal"],
-                         linestyle="--", alpha=0.80, label="IC std (63d)")
-                ax2.set_ylabel("IC std", fontsize=_t.colorbar, color=COLORS["signal"])
-                ax2.tick_params(labelsize=_t.colorbar, colors=COLORS["signal"])
-                ax2.spines["right"].set_visible(True)
-                ax2.spines["right"].set_color(COLORS["signal"])
-                ax2.spines["right"].set_alpha(0.5)
-                lines1, labs1 = ax.get_legend_handles_labels()
-                lines2, labs2 = ax2.get_legend_handles_labels()
-                ax.legend(lines1 + lines2, labs1 + labs2,
-                          frameon=False, fontsize=_t.legend, loc="upper left")
-            else:
-                ax.legend(frameon=False, fontsize=_t.legend)
+    # ── Figure B: Score Discrimination ────────────────────────────────────
+    if _has(score_spread):
+        fig_b, ax_b = make_figure(height=_panel_height)
+        ax_b.fill_between(score_spread.index, score_spread.values,  # type: ignore[union-attr]
+                          alpha=0.18, color=COLORS["positive"])
+        ax_b.plot(score_spread.index, score_spread.values,  # type: ignore[union-attr]
+                  linewidth=1.3, color=COLORS["positive"],
+                  label="Top-bottom score spread (63d avg)")
+        ax_b.axhline(0, color=COLORS["grid"], linewidth=0.8, linestyle="--")
+        ax_b.set_ylabel("Score spread", fontsize=_t.small_label)
+        ax_b.tick_params(labelsize=_t.tick)
+        ax_b.grid(axis="y", alpha=0.3, linewidth=0.5)
+        ax_b.set_axisbelow(True)
+        ax_b.legend(frameon=False, fontsize=_t.legend)
+        label_axes(ax_b, title="Score Discrimination")
+        fig_b.tight_layout()
+        figs["spread"] = fig_b
 
-        elif panel == "spread":
-            ax.fill_between(score_spread.index, score_spread.values,  # type: ignore[union-attr]
-                            alpha=0.18, color=COLORS["positive"])
-            ax.plot(score_spread.index, score_spread.values,  # type: ignore[union-attr]
-                    linewidth=1.3, color=COLORS["positive"],
-                    label="Top-bottom score spread (63d avg)")
-            ax.axhline(0, color=COLORS["grid"], linewidth=0.8, linestyle="--")
-            ax.set_ylabel("Score spread", fontsize=_t.small_label)
-            ax.tick_params(labelsize=_t.tick)
-            ax.grid(axis="y", alpha=0.3, linewidth=0.5)
-            ax.set_axisbelow(True)
-            ax.legend(frameon=False, fontsize=_t.legend)
+    # ── Figure C: Realized Discrimination ────────────────────────────────
+    if _has(realized_spread):
+        fig_c, ax_c = make_figure(height=_panel_height)
+        pos_mask = realized_spread.values >= 0  # type: ignore[union-attr]
+        ax_c.fill_between(realized_spread.index, realized_spread.values,  # type: ignore[union-attr]
+                          where=pos_mask, alpha=0.22, color=COLORS["positive"])
+        ax_c.fill_between(realized_spread.index, realized_spread.values,  # type: ignore[union-attr]
+                          where=~pos_mask, alpha=0.22, color=COLORS["negative"])
+        ax_c.plot(realized_spread.index, realized_spread.values,  # type: ignore[union-attr]
+                  linewidth=1.0, color=COLORS["neutral"],
+                  label="Realized top-bottom spread (63d avg, pre-cost)")
+        ax_c.axhline(0, color=COLORS["grid"], linewidth=0.8, linestyle="--")
+        format_pct_axis(ax_c)
+        ax_c.set_ylabel("Return spread", fontsize=_t.small_label)
+        ax_c.tick_params(labelsize=_t.tick)
+        ax_c.grid(axis="y", alpha=0.3, linewidth=0.5)
+        ax_c.set_axisbelow(True)
+        ax_c.legend(frameon=False, fontsize=_t.legend)
+        label_axes(ax_c, title="Realized Return Discrimination")
+        fig_c.tight_layout()
+        figs["realized"] = fig_c
 
-        elif panel == "realized":
-            pos_mask = realized_spread.values >= 0  # type: ignore[union-attr]
-            ax.fill_between(realized_spread.index, realized_spread.values,  # type: ignore[union-attr]
-                            where=pos_mask, alpha=0.22, color=COLORS["positive"])
-            ax.fill_between(realized_spread.index, realized_spread.values,  # type: ignore[union-attr]
-                            where=~pos_mask, alpha=0.22, color=COLORS["negative"])
-            ax.plot(realized_spread.index, realized_spread.values,  # type: ignore[union-attr]
-                    linewidth=1.0, color=COLORS["neutral"],
-                    label="Realized top-bottom spread (63d avg, pre-cost)")
-            ax.axhline(0, color=COLORS["grid"], linewidth=0.8, linestyle="--")
-            format_pct_axis(ax)
-            ax.set_ylabel("Return spread", fontsize=_t.small_label)
-            ax.tick_params(labelsize=_t.tick)
-            ax.grid(axis="y", alpha=0.3, linewidth=0.5)
-            ax.set_axisbelow(True)
-            ax.legend(frameon=False, fontsize=_t.legend)
+    # ── Figure D: Rank Persistence ────────────────────────────────────────
+    if _has(rank_pers):
+        fig_d, ax_d = make_figure(height=_panel_height)
+        _bar_cols = [
+            COLORS["positive"] if float(v) >= 0 else COLORS["negative"]
+            for v in rank_pers.values  # type: ignore[union-attr]
+        ]
+        ax_d.bar(rank_pers.index, rank_pers.values,  # type: ignore[union-attr]
+                 width=20, color=_bar_cols, alpha=0.50, zorder=2)
+        rp_roll = rank_pers.rolling(3, min_periods=2).mean()  # type: ignore[union-attr]
+        ax_d.plot(rp_roll.index, rp_roll.values,
+                  linewidth=1.3, color=COLORS["strategy"],
+                  label="3-month rolling mean", zorder=3)
+        ax_d.axhline(0, color=COLORS["grid"], linewidth=0.8, linestyle="--", zorder=1)
+        ax_d.set_ylabel("Rank autocorr.", fontsize=_t.small_label)
+        ax_d.set_ylim(-1.05, 1.05)
+        ax_d.tick_params(labelsize=_t.tick)
+        ax_d.grid(axis="y", alpha=0.3, linewidth=0.5)
+        ax_d.set_axisbelow(True)
+        ax_d.legend(frameon=False, fontsize=_t.legend)
+        label_axes(ax_d, title="Ranking Persistence")
+        fig_d.tight_layout()
+        figs["persistence"] = fig_d
 
-        elif panel == "persistence":
-            bar_colors = [
-                COLORS["positive"] if float(v) >= 0 else COLORS["negative"]
-                for v in rank_pers.values  # type: ignore[union-attr]
-            ]
-            ax.bar(rank_pers.index, rank_pers.values,  # type: ignore[union-attr]
-                   width=20, color=bar_colors, alpha=0.50, zorder=2)
-            rp_roll = rank_pers.rolling(3, min_periods=2).mean()  # type: ignore[union-attr]
-            ax.plot(rp_roll.index, rp_roll.values,
-                    linewidth=1.3, color=COLORS["strategy"],
-                    label="3-month rolling mean", zorder=3)
-            ax.axhline(0, color=COLORS["grid"], linewidth=0.8, linestyle="--", zorder=1)
-            ax.set_ylabel("Rank autocorr.", fontsize=_t.small_label)
-            ax.set_ylim(-1.05, 1.05)
-            ax.tick_params(labelsize=_t.tick)
-            ax.grid(axis="y", alpha=0.3, linewidth=0.5)
-            ax.set_axisbelow(True)
-            ax.legend(frameon=False, fontsize=_t.legend)
-
-    fig.tight_layout(h_pad=0.5)
-    if save_path:
-        save_figure(fig, save_path, close=False)
-    return fig
+    return figs
 
 
 # ---------------------------------------------------------------------------
@@ -1943,12 +1932,13 @@ def plot_family_contribution_timeline(
         fig.tight_layout()
         return fig
 
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1,
-        figsize=(FIG_WIDTH_FULL, FIG_HEIGHT_STANDARD * 1.9),
+    fig, axes = make_figure(
+        nrows=2,
+        height=FIG_HEIGHT_STANDARD * 2.2,
+        height_ratios=[1.0, 1.0],
         sharex=True,
-        gridspec_kw={"height_ratios": [1.0, 1.0]},
     )
+    ax1, ax2 = axes
 
     # --- Top panel: signed family contributions ---
     if _has(family_contrib_df):
@@ -1965,17 +1955,8 @@ def plot_family_contribution_timeline(
         ax1.tick_params(labelsize=_t.tick)
         ax1.grid(axis="y", alpha=0.3, linewidth=0.5)
         ax1.set_axisbelow(True)
-        ax1.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left", pad=4)
-        # Shared legend above ax1 — serves both panels; keeps all canvases unobstructed
+        ax1.set_title(title, fontweight="semibold", pad=8)
         n_fams = len(family_contrib_df.columns)  # type: ignore[union-attr]
-        ax1.legend(
-            frameon=False, fontsize=_t.legend,
-            loc="lower center",
-            bbox_to_anchor=(0.5, 1.03),
-            ncol=min(4, n_fams),
-            handlelength=1.2,
-            columnspacing=1.0,
-        )
 
     # --- Bottom panel: normalized absolute share (stacked area) ---
     if _has(family_share_df):
@@ -1999,8 +1980,23 @@ def plot_family_contribution_timeline(
         ax2.set_axisbelow(True)
         # No separate legend: family colours match the shared legend on ax1
 
-    fig.tight_layout(h_pad=0.6)
-    fig.subplots_adjust(top=0.88)
+    if _has(family_contrib_df):
+        handles, labels = ax1.get_legend_handles_labels()
+        _legend_ncol = min(4, n_fams)
+        _legend_rows = max(1, (n_fams + _legend_ncol - 1) // _legend_ncol)
+        ax2.legend(
+            handles, labels,
+            frameon=False, fontsize=_t.legend,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.10),
+            ncol=_legend_ncol,
+            handlelength=1.2,
+            columnspacing=1.0,
+        )
+        fig.tight_layout(h_pad=0.6)
+        fig.subplots_adjust(bottom=0.08 + 0.06 * _legend_rows)
+    else:
+        fig.tight_layout(h_pad=0.6)
     if save_path:
         save_figure(fig, save_path, close=False)
     return fig
@@ -2080,7 +2076,7 @@ def plot_score_dispersion(
     ax1.tick_params(labelsize=_t.tick)
     ax1.grid(axis="y", alpha=0.3, linewidth=0.5)
     ax1.set_axisbelow(True)
-    ax1.set_title(title, fontsize=_t.small_label, fontweight="bold", loc="left", pad=4)
+    ax1.set_title(title, fontweight="semibold", pad=8)
     ax1.legend(frameon=False, fontsize=_t.legend)
 
     # Bottom: top-minus-median conviction spread

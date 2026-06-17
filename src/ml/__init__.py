@@ -34,6 +34,7 @@ from src.ml.labels import (
     binary_direction_label,
     forward_returns,
     ranking_target,
+    risk_adjusted_ranking_target,
     volatility_target,
 )
 from src.ml.signals import (
@@ -50,6 +51,7 @@ __all__ = [
     "binary_direction_label",
     "volatility_target",
     "ranking_target",
+    "risk_adjusted_ranking_target",
     # Feature matrix
     "build_feature_matrix",
     "align_features_and_labels",

@@ -14,6 +14,8 @@ from src.experiments.ml_config import (
     ModelSpec,
     SignalSpec,
     build_ml_experiment_spec,
+    get_valid_feature_types,
+    get_valid_model_types,
     ml_experiment_hash,
     normalize_ml_config,
     validate_ml_config,
@@ -485,3 +487,237 @@ class TestMLExperimentHash:
         spec = self._make_spec()
         h = ml_experiment_hash(spec)
         assert all(c in "0123456789abcdef" for c in h)
+
+
+# ---------------------------------------------------------------------------
+# Registry consistency cross-checks (additive — Phase 1)
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryConsistency:
+    """Verify that the registry YAML stays in sync with ml_config frozensets."""
+
+    def test_valid_feature_types_match_registry(self):
+        from src.agent.registry.registry_loader import load_registry
+        registry = load_registry()
+        assert registry.feature_names() == get_valid_feature_types()
+
+    def test_valid_model_types_match_registry(self):
+        from src.agent.registry.registry_loader import load_registry
+        registry = load_registry()
+        assert registry.model_names() == get_valid_model_types()
+
+
+# ---------------------------------------------------------------------------
+# rebalance_frequency_days — Phase B (D1)
+# ---------------------------------------------------------------------------
+
+
+class TestRebalanceFrequencyDaysValidation:
+    """validate_ml_config rejects invalid rebalance_frequency_days values."""
+
+    def test_valid_frequency_5(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"transaction_cost_bps": 5.0, "rebalance_frequency_days": 5}
+        validate_ml_config(cfg)  # no raise
+
+    def test_valid_frequency_1(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"rebalance_frequency_days": 1}
+        validate_ml_config(cfg)  # no raise
+
+    def test_zero_is_invalid(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"rebalance_frequency_days": 0}
+        with pytest.raises(ValueError, match="rebalance_frequency_days"):
+            validate_ml_config(cfg)
+
+    def test_negative_is_invalid(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"rebalance_frequency_days": -3}
+        with pytest.raises(ValueError, match="rebalance_frequency_days"):
+            validate_ml_config(cfg)
+
+    def test_float_is_invalid(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"rebalance_frequency_days": 5.5}
+        with pytest.raises(ValueError, match="rebalance_frequency_days"):
+            validate_ml_config(cfg)
+
+    def test_omitted_does_not_raise(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"transaction_cost_bps": 5.0}
+        validate_ml_config(cfg)  # no raise — omitted is allowed (defaults to 1)
+
+
+class TestRebalanceFrequencyDaysNormalization:
+    """normalize_ml_config defaults rebalance_frequency_days to 1."""
+
+    def test_default_when_execution_absent(self):
+        cfg = _minimal_v2_cfg()
+        norm = normalize_ml_config(cfg)
+        assert norm["execution"]["rebalance_frequency_days"] == 1
+
+    def test_default_when_key_absent_from_execution(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"transaction_cost_bps": 5.0}
+        norm = normalize_ml_config(cfg)
+        assert norm["execution"]["rebalance_frequency_days"] == 1
+
+    def test_configured_value_preserved(self):
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"rebalance_frequency_days": 5}
+        norm = normalize_ml_config(cfg)
+        assert norm["execution"]["rebalance_frequency_days"] == 5
+
+
+class TestRebalanceFrequencyDaysMLExperimentSpec:
+    """MLExperimentSpec and build_ml_experiment_spec handle rebalance_frequency_days."""
+
+    def _norm_cfg_with_freq(self, freq: int) -> dict:
+        cfg = _minimal_v2_cfg()
+        cfg["execution"] = {"rebalance_frequency_days": freq}
+        return normalize_ml_config(cfg)
+
+    def test_default_spec_has_frequency_1(self):
+        cfg = _minimal_v2_cfg()
+        norm = normalize_ml_config(cfg)
+        spec = build_ml_experiment_spec(norm)
+        assert spec.rebalance_frequency_days == 1
+
+    def test_configured_frequency_in_spec(self):
+        norm = self._norm_cfg_with_freq(5)
+        spec = build_ml_experiment_spec(norm)
+        assert spec.rebalance_frequency_days == 5
+
+    def test_default_frequency_excluded_from_hash(self):
+        """rebalance_frequency_days=1 must not change existing experiment hashes."""
+        norm_without = normalize_ml_config(_minimal_v2_cfg())
+        norm_with = normalize_ml_config(_minimal_v2_cfg())
+        norm_with["execution"]["rebalance_frequency_days"] = 1
+
+        spec_without = build_ml_experiment_spec(norm_without)
+        spec_with = build_ml_experiment_spec(norm_with)
+        assert ml_experiment_hash(spec_without) == ml_experiment_hash(spec_with)
+
+    def test_nondefault_frequency_changes_hash(self):
+        norm1 = normalize_ml_config(_minimal_v2_cfg())
+        norm5 = normalize_ml_config(_minimal_v2_cfg())
+        norm5["execution"]["rebalance_frequency_days"] = 5
+
+        spec1 = build_ml_experiment_spec(norm1)
+        spec5 = build_ml_experiment_spec(norm5)
+        assert ml_experiment_hash(spec1) != ml_experiment_hash(spec5)
+
+
+# ---------------------------------------------------------------------------
+# Phase C — retrain_frequency_days config support
+# ---------------------------------------------------------------------------
+
+
+def _cfg_with_retrain(retrain_days: int) -> dict:
+    """Minimal v2 config with retrain_frequency_days in validation.parameters."""
+    cfg = _minimal_v2_cfg()
+    cfg["validation"] = {
+        "type": "rolling",
+        "parameters": {
+            "train_months": 48,
+            "test_months": 12,
+            "gap_days": 0,
+            "retrain_frequency_days": retrain_days,
+        },
+    }
+    return cfg
+
+
+class TestRetrainFrequencyDaysValidation:
+    """validate_ml_config rejects invalid retrain_frequency_days values."""
+
+    def test_valid_30(self):
+        validate_ml_config(_cfg_with_retrain(30))  # must not raise
+
+    def test_valid_1(self):
+        validate_ml_config(_cfg_with_retrain(1))  # must not raise
+
+    def test_zero_is_invalid(self):
+        cfg = _cfg_with_retrain(0)
+        with pytest.raises(ValueError, match="retrain_frequency_days"):
+            validate_ml_config(cfg)
+
+    def test_negative_is_invalid(self):
+        cfg = _cfg_with_retrain(-5)
+        with pytest.raises(ValueError, match="retrain_frequency_days"):
+            validate_ml_config(cfg)
+
+    def test_float_is_invalid(self):
+        cfg = _minimal_v2_cfg()
+        cfg["validation"] = {
+            "type": "rolling",
+            "parameters": {"train_months": 24, "test_months": 12, "retrain_frequency_days": 5.5},
+        }
+        with pytest.raises(ValueError, match="retrain_frequency_days"):
+            validate_ml_config(cfg)
+
+    def test_absent_is_valid(self):
+        cfg = _minimal_v2_cfg()
+        cfg["validation"] = {
+            "type": "rolling",
+            "parameters": {"train_months": 24, "test_months": 12},
+        }
+        validate_ml_config(cfg)  # must not raise
+
+
+class TestRetrainFrequencyDaysMLExperimentSpec:
+    """MLExperimentSpec and build_ml_experiment_spec handle retrain_frequency_days."""
+
+    def test_default_spec_retrain_is_none(self):
+        cfg = _minimal_v2_cfg()
+        norm = normalize_ml_config(cfg)
+        spec = build_ml_experiment_spec(norm)
+        assert spec.retrain_frequency_days is None
+
+    def test_configured_retrain_in_spec(self):
+        cfg = _cfg_with_retrain(30)
+        norm = normalize_ml_config(cfg)
+        spec = build_ml_experiment_spec(norm)
+        assert spec.retrain_frequency_days == 30
+
+    def test_null_retrain_excluded_from_hash(self):
+        """retrain_frequency_days=None must not change existing experiment hashes."""
+        cfg_no_retrain = _minimal_v2_cfg()
+        cfg_with_null = _minimal_v2_cfg()
+        cfg_with_null["validation"] = {
+            "type": "rolling",
+            "parameters": {"train_months": 24, "test_months": 12},
+        }
+        # Both should produce the same hash (no retrain field in either)
+        spec1 = build_ml_experiment_spec(normalize_ml_config(cfg_no_retrain))
+        spec2 = build_ml_experiment_spec(normalize_ml_config(cfg_with_null))
+        assert ml_experiment_hash(spec1) == ml_experiment_hash(spec2)
+        assert spec1.retrain_frequency_days is None
+        assert spec2.retrain_frequency_days is None
+
+    def test_retrain_30_changes_hash_vs_none(self):
+        """A configured retrain value must change the experiment hash."""
+        cfg_none = normalize_ml_config(_minimal_v2_cfg())
+        cfg_30 = normalize_ml_config(_cfg_with_retrain(30))
+
+        spec_none = build_ml_experiment_spec(cfg_none)
+        spec_30 = build_ml_experiment_spec(cfg_30)
+        assert ml_experiment_hash(spec_none) != ml_experiment_hash(spec_30)
+
+    def test_different_retrain_values_produce_different_hashes(self):
+        spec_21 = build_ml_experiment_spec(normalize_ml_config(_cfg_with_retrain(21)))
+        spec_30 = build_ml_experiment_spec(normalize_ml_config(_cfg_with_retrain(30)))
+        assert ml_experiment_hash(spec_21) != ml_experiment_hash(spec_30)
+
+    def test_to_dict_includes_retrain_frequency_days(self):
+        spec = build_ml_experiment_spec(normalize_ml_config(_cfg_with_retrain(21)))
+        d = spec.to_dict()
+        assert "retrain_frequency_days" in d
+        assert d["retrain_frequency_days"] == 21
+
+    def test_to_dict_retrain_none_when_absent(self):
+        spec = build_ml_experiment_spec(normalize_ml_config(_minimal_v2_cfg()))
+        d = spec.to_dict()
+        assert d["retrain_frequency_days"] is None

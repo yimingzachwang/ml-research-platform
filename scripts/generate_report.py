@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.reporting.report_builder import generate_experiment_report
+from src.visualization.render_profiles import set_active_profile
 from src.reporting.report_spec import (
     AUDIT_REPORT,
     CANONICAL_SHOWCASE,
@@ -51,7 +52,15 @@ def main() -> None:
         default="standard",
         help="Report preset (default: standard).",
     )
+    parser.add_argument(
+        "--render-profile",
+        choices=["report", "frontend"],
+        default="report",
+        help="Render profile for figures (default: report).",
+    )
     args = parser.parse_args()
+
+    set_active_profile(args.render_profile)
 
     paths = generate_experiment_report(
         artefact_path=args.experiment_dir,
