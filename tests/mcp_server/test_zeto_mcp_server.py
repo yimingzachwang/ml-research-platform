@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import yaml
 from src.mcp import zeto_server as zeto
-from src.orchestration.api.research_api import ExecutionResult
+from src.orchestration.api.research_api import ExecutionResult, WorkflowTrace
 from src.orchestration.config_generation.draft_schema import (
     DraftChange,
     DraftValidationResult,
@@ -60,6 +60,7 @@ _EXPECTED_TOOLS = {
     "list_research_sessions",
     "get_latest_research_session",
     "check_research_workflow_state",
+    "get_workflow_trace",
     "build_context_summary",
     "run_experiment_review",
     "generate_iteration_proposal",
@@ -389,7 +390,7 @@ def test_no_all_in_one_or_loop_tool_exists():
     names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
     # Granular tools only — nothing that runs the whole flow silently.
     # (check_research_workflow_state is a read-only preflight, not a run loop.)
-    assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
+    assert len(names) == 51  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2 + 1 Workflow Trace get_workflow_trace
     for forbidden in ("auto", "loop", "full", "pipeline", "run_all", "orchestrate", "everything"):
         assert not any(forbidden in n.lower() for n in names), f"loop-like tool name: {forbidden}"
 
@@ -1498,6 +1499,105 @@ def test_workflow_state_unapproved_draft_mentions_validate():
 
 
 # ---------------------------------------------------------------------------
+# get_workflow_trace
+# ---------------------------------------------------------------------------
+
+
+def _stub_trace(**overrides) -> WorkflowTrace:
+    defaults = dict(
+        workflow_id="s1",
+        experiment_name="exp_a",
+        current_owner="Render & Execution Engine",
+        current_phase="needs_baseline_execution",
+        current_action=None,
+        current_tool="execute_approved_config",
+        status="waiting_for_user",
+        execution=None,
+        started_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+        metadata={},
+    )
+    defaults.update(overrides)
+    return WorkflowTrace(**defaults)
+
+
+def test_workflow_trace_is_read_only_envelope():
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace()) as m:
+        out = zeto.get_workflow_trace("s1")
+    m.assert_called_once_with("s1", experiment_name=None)
+    assert _CONTRACT_KEYS.issubset(out)
+    assert out["ok"] is True
+    assert out["stage"] == "workflow_trace"
+
+
+def test_workflow_trace_data_matches_projection():
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace()):
+        out = zeto.get_workflow_trace("s1")
+    assert out["data"]["workflow_id"] == "s1"
+    assert out["data"]["current_owner"] == "Render & Execution Engine"
+    assert out["data"]["current_phase"] == "needs_baseline_execution"
+    assert out["data"]["status"] == "waiting_for_user"
+    assert out["data"]["execution"] is None
+
+
+def test_workflow_trace_next_suggested_action_is_current_tool():
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace(current_tool="approve_experiment_draft")):
+        out = zeto.get_workflow_trace("s1")
+    assert out["next_suggested_action"] == "approve_experiment_draft"
+
+
+def test_workflow_trace_display_mentions_owner_phase_status():
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace()):
+        out = zeto.get_workflow_trace("s1")
+    assert "Render & Execution Engine" in out["display"]
+    assert "needs_baseline_execution" in out["display"]
+    assert "waiting_for_user" in out["display"]
+
+
+def test_workflow_trace_idle_display_and_next_action():
+    idle = _stub_trace(
+        experiment_name=None, current_owner="Idle", current_phase="idle",
+        current_tool=None, status="idle",
+    )
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=idle):
+        out = zeto.get_workflow_trace("s1")
+    assert out["next_suggested_action"] == "no_active_experiment"
+    assert "idle" in out["display"].lower()
+
+
+def test_workflow_trace_passes_experiment_name_override():
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace()) as m:
+        zeto.get_workflow_trace("s1", experiment_name="other_exp")
+    m.assert_called_once_with("s1", experiment_name="other_exp")
+
+
+def test_workflow_trace_unknown_session_returns_refusal_not_exception():
+    with patch(f"{_MOD}.compute_workflow_trace", side_effect=ValueError("no session")):
+        out = zeto.get_workflow_trace("missing")
+    assert out["ok"] is False
+    assert out["stage"] == "workflow_trace_session_not_found"
+    assert "no session" in out["display"]
+
+
+def test_workflow_trace_executes_nothing_no_governance_side_effects():
+    """Read-only: no session-event recording, no draft/approval/execution call."""
+    with (
+        patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace()),
+        patch(f"{_MOD}.record_session_event") as m_event,
+        patch(f"{_MOD}.execute_approved_config") as m_exec,
+    ):
+        zeto.get_workflow_trace("s1")
+    m_event.assert_not_called()
+    m_exec.assert_not_called()
+
+
+def test_workflow_trace_response_is_compact():
+    with patch(f"{_MOD}.compute_workflow_trace", return_value=_stub_trace()):
+        out = zeto.get_workflow_trace("s1")
+    assert len(json.dumps(out)) < 2000
+
+
+# ---------------------------------------------------------------------------
 # Required display content for specific tools
 # ---------------------------------------------------------------------------
 
@@ -1757,7 +1857,7 @@ def test_render_still_refuses_unapproved_draft_after_gate():
 
 def test_approval_gate_adds_no_new_tool_or_loop():
     names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
-    assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
+    assert len(names) == 51  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2 + 1 Workflow Trace get_workflow_trace
     for forbidden in ("auto", "loop", "full", "pipeline", "run_all", "orchestrate", "everything"):
         assert not any(forbidden in n.lower() for n in names)
 
@@ -1840,7 +1940,7 @@ def test_governance_changes_add_no_new_tool_or_loop():
     # The fix is to next_suggested_action / displays only — no tool was added,
     # and nothing loop-like was introduced.
     names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
-    assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
+    assert len(names) == 51  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2 + 1 Workflow Trace get_workflow_trace
     for forbidden in ("auto", "loop", "full", "pipeline", "run_all", "orchestrate"):
         assert not any(forbidden in n.lower() for n in names)
 
@@ -2149,6 +2249,63 @@ def test_execute_with_run_delegates_exactly_once():
     assert out["data"]["plots_dir"].endswith("/plots")
     # Compact: no full run object / report content.
     assert "execution" not in out["data"]
+
+
+def _stub_execution_with_stages() -> ExecutionResult:
+    execution = _stub_execution(True)
+    execution.stage_executions = [
+        {"name": "Load market data", "status": "completed", "started_at": "t0",
+         "ended_at": "t1", "duration_s": 4.2, "metadata": {}, "error": None},
+        {"name": "Backtesting", "status": "completed", "started_at": "t1",
+         "ended_at": "t2", "duration_s": 1.1, "metadata": {}, "error": None},
+    ]
+    execution.total_duration_s = 5.3
+    return execution
+
+
+def test_execute_success_includes_stage_executions_and_total_duration():
+    with patch(f"{_MOD}.execute_approved_config", return_value=_stub_execution_with_stages()):
+        out = zeto.execute_approved_config("configs/experiments/x.yaml", confirmation="RUN")
+    assert out["data"]["stage_executions"][0]["name"] == "Load market data"
+    assert out["data"]["stage_executions"][1]["name"] == "Backtesting"
+    assert out["data"]["total_duration_s"] == 5.3
+
+
+def test_execute_success_display_includes_stage_timings():
+    with patch(f"{_MOD}.execute_approved_config", return_value=_stub_execution_with_stages()):
+        out = zeto.execute_approved_config("configs/experiments/x.yaml", confirmation="RUN")
+    assert "Load market data 4.2s" in out["display"]
+    assert "Backtesting 1.1s" in out["display"]
+    assert "total 5.3s" in out["display"]
+
+
+def test_execute_success_existing_keys_unchanged_when_stages_present():
+    """The new fields must be additive — no existing key is renamed or removed."""
+    with patch(f"{_MOD}.execute_approved_config", return_value=_stub_execution_with_stages()):
+        out = zeto.execute_approved_config("configs/experiments/x.yaml", confirmation="RUN")
+    assert out["data"]["success"] is True
+    assert out["data"]["experiment_name"] == "exp_a_v2"
+    assert out["data"]["artefact_root"] == "results/experiments/exp_a_v2"
+    assert out["data"]["plots_dir"].endswith("/plots")
+
+
+def test_execute_success_without_stage_executions_omits_stage_timings_in_display():
+    with patch(f"{_MOD}.execute_approved_config", return_value=_stub_execution(True)):
+        out = zeto.execute_approved_config("configs/experiments/x.yaml", confirmation="RUN")
+    assert "Stage timings" not in out["display"]
+    assert out["data"]["stage_executions"] is None
+    assert out["data"]["total_duration_s"] is None
+
+
+def test_execute_failure_response_unaffected_by_stage_fields():
+    """Failure payload shape is untouched — this proposal only extends the
+    success response."""
+    with patch(f"{_MOD}.execute_approved_config", return_value=_stub_execution(False)):
+        out = zeto.execute_approved_config("configs/experiments/x.yaml", confirmation="RUN")
+    assert out["ok"] is False
+    assert out["stage"] == "execution_failed"
+    assert "stage_executions" not in out["data"]
+    assert set(out["data"].keys()) == {"success", "config_path", "error", "new_experiment_available"}
 
 
 def test_execute_dry_run_plans_only():

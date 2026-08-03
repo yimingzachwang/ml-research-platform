@@ -7,9 +7,15 @@ All tests exercise the version "2" config code path via run_experiment_from_conf
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -230,6 +236,80 @@ class TestMLWalkForward:
             run = run_experiment_from_config(p)
         assert run.walk_forward is not None
         assert run.walk_forward.n_splits > 0
+
+
+# ---------------------------------------------------------------------------
+# Figure lifecycle regression — this exact config previously triggered
+# Matplotlib's "More than 20 figures have been opened" warning, because
+# _build_plots() legitimately builds ~26 figures for a walk-forward ML run
+# before any of them are saved or closed.
+# ---------------------------------------------------------------------------
+
+
+class TestMLFigureLifecycle:
+    _WF_EXTRA = {
+        "validation": {
+            "type": "rolling",
+            "parameters": {"train_months": 18, "test_months": 6},
+        },
+    }
+
+    def test_build_plots_exceeds_default_open_figure_threshold(self, tmp_path: Path):
+        """Confirms this scenario is a genuine regression case, not a trivial one:
+        _build_plots() really does produce more figures than Matplotlib's default
+        open-figure warning threshold (20) for this exact walk-forward config."""
+        import src.experiments.orchestrator as orch
+
+        counts: list[int] = []
+        original = orch._build_plots
+
+        def _spy(*args, **kwargs):
+            plots = original(*args, **kwargs)
+            counts.append(len(plots))
+            return plots
+
+        p = _write_v2_cfg(tmp_path, self._WF_EXTRA)
+        with (
+            patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES)),
+            patch.object(orch, "_build_plots", side_effect=_spy),
+        ):
+            run_experiment_from_config(p)
+        assert counts, "_build_plots() was never called"
+        assert counts[0] > 20
+
+    def test_walk_forward_run_raises_no_open_figure_warning(self, tmp_path: Path):
+        p = _write_v2_cfg(tmp_path, self._WF_EXTRA)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES)):
+                run = run_experiment_from_config(p)
+        assert run.walk_forward is not None
+
+    def test_walk_forward_run_closes_all_figures(self, tmp_path: Path):
+        p = _write_v2_cfg(tmp_path, self._WF_EXTRA)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES)):
+            run_experiment_from_config(p)
+        assert len(plt.get_fignums()) == 0
+
+    def test_walk_forward_run_with_save_plots_writes_index_and_pngs(self, tmp_path: Path):
+        extra = {**self._WF_EXTRA, "output": {
+            "base_dir": str(tmp_path / "results"),
+            "registry_path": str(tmp_path / "results" / "registry.json"),
+            "register": True,
+            "save_plots": True,
+        }}
+        p = _write_v2_cfg(tmp_path, extra)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES)):
+                run = run_experiment_from_config(p)
+
+        plots_dir = run.output_path / "plots"
+        index = json.loads((plots_dir / "plot_index.json").read_text())
+        assert len(index) > 20
+        for entry in index:
+            assert (plots_dir / f"{entry['name']}.png").exists()
+        assert len(plt.get_fignums()) == 0
 
 
 # ---------------------------------------------------------------------------

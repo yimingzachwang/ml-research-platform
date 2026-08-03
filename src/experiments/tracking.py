@@ -33,6 +33,7 @@ import pandas as pd
 
 from src.core import ExperimentContext
 from src.experiments.results import ExperimentResult, load_experiment, save_experiment
+from src.visualization.utils import save_figure
 
 if TYPE_CHECKING:
     from src.experiments.config import ExperimentSpec
@@ -89,8 +90,10 @@ def save_run(
     if plots:
         for name, fig in plots.items():
             fname = name if name.endswith(".png") else f"{name}.png"
-            fig.savefig(plots_dir / fname, bbox_inches="tight",
-                        dpi=getattr(fig, "_save_dpi", 150))
+            save_figure(
+                fig, plots_dir / fname, close=True,
+                bbox_inches="tight", dpi=getattr(fig, "_save_dpi", 150),
+            )
 
     return out
 

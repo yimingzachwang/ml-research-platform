@@ -1,8 +1,10 @@
 """Tests for save_run / load_run in src/experiments/tracking.py."""
 
 import json
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import matplotlib
 
@@ -105,6 +107,67 @@ def test_save_run_with_plots(result: ExperimentResult, tmp_path: Path) -> None:
     out = save_run(result, output_dir=tmp_path, plots={"equity_curve": fig})
     plt.close(fig)
     assert (out / "plots" / "equity_curve.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# save_run — figure lifecycle (closes immediately after saving)
+# ---------------------------------------------------------------------------
+
+
+def test_save_run_closes_figure_immediately(result: ExperimentResult, tmp_path: Path) -> None:
+    fig, ax = plt.subplots()
+    ax.plot([1, 2, 3])
+    num = fig.number
+    save_run(result, output_dir=tmp_path, plots={"equity_curve": fig})
+    assert num not in plt.get_fignums()
+
+
+def test_save_run_preserves_savefig_kwargs(result: ExperimentResult, tmp_path: Path) -> None:
+    fig, ax = plt.subplots()
+    ax.plot([1, 2, 3])
+    with patch.object(fig, "savefig") as mock_savefig:
+        save_run(result, output_dir=tmp_path, plots={"equity_curve": fig})
+    mock_savefig.assert_called_once()
+    _, kwargs = mock_savefig.call_args
+    assert kwargs["bbox_inches"] == "tight"
+    assert kwargs["dpi"] == 150
+    plt.close(fig)
+
+
+def test_save_run_respects_custom_dpi_attribute(result: ExperimentResult, tmp_path: Path) -> None:
+    fig, ax = plt.subplots()
+    ax.plot([1, 2, 3])
+    fig._save_dpi = 300
+    with patch.object(fig, "savefig") as mock_savefig:
+        save_run(result, output_dir=tmp_path, plots={"equity_curve": fig})
+    _, kwargs = mock_savefig.call_args
+    assert kwargs["dpi"] == 300
+    plt.close(fig)
+
+
+def test_save_run_with_many_plots_leaves_none_open(
+    result: ExperimentResult, tmp_path: Path
+) -> None:
+    """25 figures — more than Matplotlib's default open-figure warning threshold —
+    must all be closed by the time save_run() returns, and save_run() itself must
+    not raise/warn while saving+closing them (creating the 25 raw figures here is
+    the incidental part that would warn on its own; that's not save_run()'s
+    concern — production code avoids it via the rc_context in orchestrator.py)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        figs = {}
+        for i in range(25):
+            fig, ax = plt.subplots()
+            ax.plot([1, 2, 3])
+            figs[f"plot_{i}"] = fig
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        save_run(result, output_dir=tmp_path, plots=figs)
+
+    assert len(plt.get_fignums()) == 0
+    for i in range(25):
+        assert (tmp_path / result.experiment_name / "plots" / f"plot_{i}.png").exists()
 
 
 def test_save_run_with_predictions(result: ExperimentResult, tmp_path: Path) -> None:

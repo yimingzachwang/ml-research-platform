@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from src.orchestration.api import research_api as api
 from src.orchestration.api.research_api import ExecutionResult, ExecutionReviewResult
 from src.orchestration.api.schemas import LLMReviewOutput
@@ -87,6 +88,76 @@ def test_engine_error_is_captured_not_raised(tmp_path):
         result = api.execute_approved_config(cfg)
     assert result.success is False
     assert "boom" in (result.error or "")
+
+
+# ---------------------------------------------------------------------------
+# stage_executions / total_duration_s — additive execution-trace surfacing
+# ---------------------------------------------------------------------------
+
+
+def _make_stage(name, duration_s, status="completed"):
+    from src.experiments.execution_profile import StageExecution
+    return StageExecution(
+        name=name, status=status,
+        started_at="2026-01-01T00:00:00+00:00",
+        ended_at="2026-01-01T00:00:01+00:00",
+        duration_s=duration_s,
+    )
+
+
+def test_stage_executions_are_serialized_as_dicts(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("version: '2'\n")
+    fake_run = MagicMock()
+    fake_run.output_path = tmp_path / "results" / "experiments" / "foo"
+    fake_run.stage_executions = [_make_stage("Load market data", 4.2), _make_stage("Backtesting", 1.1)]
+    fake_paths = MagicMock()
+    fake_paths.markdown = tmp_path / "reports" / "foo.md"
+    with patch(_RUNNER, return_value=(fake_run, fake_paths)):
+        result = api.execute_approved_config(cfg, report=True)
+    assert result.stage_executions == [
+        {"name": "Load market data", "status": "completed",
+         "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
+         "duration_s": 4.2, "metadata": {}, "error": None},
+        {"name": "Backtesting", "status": "completed",
+         "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
+         "duration_s": 1.1, "metadata": {}, "error": None},
+    ]
+
+
+def test_total_duration_s_sums_stage_durations(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("version: '2'\n")
+    fake_run = MagicMock()
+    fake_run.output_path = tmp_path / "results" / "experiments" / "foo"
+    fake_run.stage_executions = [_make_stage("Load market data", 4.2), _make_stage("Backtesting", 1.1)]
+    fake_paths = MagicMock()
+    fake_paths.markdown = tmp_path / "reports" / "foo.md"
+    with patch(_RUNNER, return_value=(fake_run, fake_paths)):
+        result = api.execute_approved_config(cfg, report=True)
+    assert result.total_duration_s == pytest.approx(5.3)
+
+
+def test_dry_run_leaves_stage_executions_none():
+    result = api.execute_approved_config("any/path.yaml", dry_run=True)
+    assert result.stage_executions is None
+    assert result.total_duration_s is None
+
+
+def test_execution_result_to_dict_includes_new_fields(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("version: '2'\n")
+    fake_run = MagicMock()
+    fake_run.output_path = tmp_path / "results" / "experiments" / "foo"
+    fake_run.stage_executions = [_make_stage("Backtesting", 1.1)]
+    fake_paths = MagicMock()
+    fake_paths.markdown = tmp_path / "reports" / "foo.md"
+    with patch(_RUNNER, return_value=(fake_run, fake_paths)):
+        result = api.execute_approved_config(cfg, report=True)
+    data = result.to_dict()
+    assert "stage_executions" in data
+    assert "total_duration_s" in data
+    assert data["total_duration_s"] == pytest.approx(1.1)
 
 
 # ---------------------------------------------------------------------------

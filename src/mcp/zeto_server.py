@@ -94,6 +94,22 @@ def _mfmt(value: Any) -> str:
     return "n/a" if value is None else str(value)
 
 
+def _stage_summary(stage_executions: list[dict[str, Any]] | None) -> str:
+    """Compact 'name Xs, name Ys, ...' stage-timing string for display text.
+
+    Observability only — never affects execution_completed/execution_failed
+    semantics, only the human-readable summary attached to a successful result.
+    """
+    if not stage_executions:
+        return ""
+    parts = [
+        f"{s['name']} {s['duration_s']:.1f}s"
+        for s in stage_executions
+        if s.get("duration_s") is not None
+    ]
+    return ", ".join(parts)
+
+
 def _name_sev(failure_modes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Compact failure-mode/flag form: only name + severity (no descriptions)."""
     return [
@@ -1706,7 +1722,12 @@ def check_research_workflow_state(experiment_name: str) -> dict[str, Any]:
     transitions so the workflow is never run out of order.
     """
     state = _api.get_research_workflow_state(experiment_name)
-    next_action, display = _workflow_next_and_display(state)
+    # The next-tool/display logic used to be duplicated here as
+    # _workflow_next_and_display(); it now lives once, in research_api, as
+    # next_tool_and_display() — the same function Workflow Trace's phase
+    # derivation (_api.compute_workflow_trace()) derives from, so there is
+    # exactly one authoritative workflow-progression definition.
+    next_action, display = _api.next_tool_and_display(state)
     # Compact subset — flags/paths/ids only, no full filesystem inspection.
     data = {
         "experiment_name": state["experiment_name"],
@@ -1724,6 +1745,44 @@ def check_research_workflow_state(experiment_name: str) -> dict[str, Any]:
         "plots_dir": state["plots_dir"],
     }
     return _envelope(True, "workflow_state_checked", display, data, next_action)
+
+
+def get_workflow_trace(session_id: str, experiment_name: str | None = None) -> dict[str, Any]:
+    """Read-only: who owns this research workflow right now, what phase it's
+    in, and what's next — derived from the session's own event log
+    (record_session_event) and the same artefact-existence state
+    check_research_workflow_state already inspects. Executes nothing, calls
+    no LLM, and touches no quant-engine code; introduces no new persisted
+    state.
+
+    experiment_name defaults to the session's active_experiment; pass it
+    explicitly for a session that has touched more than one experiment.
+
+    'execution' is always null here — a live execution can only be seen
+    synchronously, from inside execute_approved_config's own response, while
+    that call is in flight; this tool cannot poll for it separately.
+    """
+    try:
+        trace = _api.compute_workflow_trace(session_id, experiment_name=experiment_name)
+    except ValueError as exc:
+        return _envelope(
+            False, "workflow_trace_session_not_found", str(exc),
+            {"session_id": session_id, "error": str(exc)},
+            "create_research_session",
+        )
+
+    data = trace.to_dict()
+    if trace.current_phase == "idle":
+        display = f"[{trace.workflow_id}] Idle — no active experiment for this session."
+        next_action = "no_active_experiment"
+    else:
+        display = (
+            f"[{trace.experiment_name}] Owner: {trace.current_owner}. "
+            f"Phase: {trace.current_phase}. Status: {trace.status}. "
+            f"Next: {trace.current_tool}."
+        )
+        next_action = trace.current_tool
+    return _envelope(True, "workflow_trace", display, data, next_action)
 
 
 def build_context_summary(experiment_name: str) -> dict[str, Any]:
@@ -2264,10 +2323,18 @@ def execute_approved_config(
         "artefact_root": execution.artefact_root,
         "report_path": execution.report_path,
         "plots_dir": plots,
+        "stage_executions": execution.stage_executions,
+        "total_duration_s": execution.total_duration_s,
     }
+    stage_summary = _stage_summary(execution.stage_executions)
     display = (
         f"Executed one config -> experiment '{execution.experiment_name}'. "
         f"Artefacts: {execution.artefact_root}. (single run; no loop, no retry)"
+        + (
+            f" Stage timings: {stage_summary} (total {execution.total_duration_s:.1f}s)."
+            if stage_summary
+            else ""
+        )
     )
     return _envelope(True, "execution_completed", display, data, "verify_experiment_artifacts")
 
@@ -3615,6 +3682,14 @@ _TOOLS: list[tuple[Any, str, str]] = [
      "draft + approval, rendered YAML, revised run, report/plots) and the "
      "recommended next step. Executes nothing. Call before major transitions "
      "to avoid out-of-order calls (e.g. validating before a draft exists)."),
+    (get_workflow_trace, "get_workflow_trace",
+     "Read-only: who owns this research workflow right now (Proposal & Draft "
+     "Pipeline / Approval Gate / Render & Execution Engine / Review Engine / "
+     "Idle), what phase it's in, what the last recorded session action was, "
+     "and what's next. session_id is required; experiment_name defaults to "
+     "the session's active experiment. Derived entirely from the existing "
+     "session event log and check_research_workflow_state's artefact "
+     "inspection — introduces no new state. Executes nothing."),
     (build_context_summary, "build_context_summary",
      "Assemble deterministic structured context (failure modes, performance, "
      "validation) for an experiment. No LLM call, no experiment run."),

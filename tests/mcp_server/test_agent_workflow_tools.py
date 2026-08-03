@@ -542,7 +542,7 @@ class TestPhase3CToolRegistration:
 
     def test_total_tool_count(self):
         names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
-        assert len(names) == 50  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2
+        assert len(names) == 51  # 36 original + 4 Phase-3C + 1 Phase-4A + 3 Phase-4B + 2 Phase-5C + 2 Phase-5E + 1 Phase-5F + 1 Phase-5G.2 + 1 Workflow Trace get_workflow_trace
 
     def test_new_tools_have_descriptions(self):
         for t in zeto.mcp._tool_manager.list_tools():

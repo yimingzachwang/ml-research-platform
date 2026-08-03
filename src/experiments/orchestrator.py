@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,13 @@ import pandas as pd
 
 from src.experiments.config import ExperimentSpec
 from src.experiments.config_io import load_config, normalize_config, validate_config
+from src.experiments.execution_profile import (
+    StageExecution,
+    StageRecorder,
+    execution_trace_jsonl_path,
+    jsonl_sink,
+    write_execution_trace,
+)
 from src.experiments.factory import (
     build_experiment_spec,
     build_strategy,
@@ -66,6 +73,7 @@ class ExperimentRun:
     experiment_result: ExperimentResult
     walk_forward: WalkForwardResult | None
     output_path: Path
+    stage_executions: list[StageExecution] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -699,7 +707,11 @@ def _write_normalized_config(norm_cfg: dict[str, Any], out_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run_experiment_from_config(path: str | Path, profile: str = "report") -> ExperimentRun:
+def run_experiment_from_config(
+    path: str | Path,
+    profile: str = "report",
+    execution_trace_base: str | Path | None = None,
+) -> ExperimentRun:
     """Run a complete experiment from a YAML or JSON config file.
 
     Supports version "1" configs (D1 strategy-based pipeline) and version "2"
@@ -711,6 +723,10 @@ def run_experiment_from_config(path: str | Path, profile: str = "report") -> Exp
         profile: Rendering/export profile for canonical figures.
                  "report" (default) — compact publication density.
                  "frontend" — browser-inspectable typography and spacing.
+        execution_trace_base: Override for the live execution-trace JSONL
+                 directory (default ``results/execution_trace/``) — mirrors
+                 the ``sessions_base``/``llm_base`` override pattern used
+                 elsewhere for test isolation.
 
     Returns:
         ExperimentRun containing all produced artefacts and output path.
@@ -730,36 +746,65 @@ def run_experiment_from_config(path: str | Path, profile: str = "report") -> Exp
     raw_cfg = load_config(source_path)
     version = str(raw_cfg.get("version", "1"))
     if version == "2":
-        return _run_ml_experiment(raw_cfg, source_path, profile=profile)
+        return _run_ml_experiment(
+            raw_cfg, source_path, profile=profile,
+            execution_trace_base=execution_trace_base,
+        )
+
+    experiment_name = str(raw_cfg.get("name") or source_path.stem)
+    trace_path = execution_trace_jsonl_path(
+        experiment_name,
+        **({"base_dir": execution_trace_base} if execution_trace_base is not None else {}),
+    )
+    recorder = StageRecorder(sink=jsonl_sink(trace_path))
 
     # ------------------------------------------------------------------
     # 2-3. Validate, normalize (version "1" pipeline)
     # ------------------------------------------------------------------
-    validate_config(raw_cfg)
-    norm_cfg = normalize_config(raw_cfg)
+    with recorder.stage(
+        "Validate & normalise configuration",
+        metadata={"name": experiment_name, "version": version},
+    ):
+        validate_config(raw_cfg)
+        norm_cfg = normalize_config(raw_cfg)
 
     # ------------------------------------------------------------------
     # 4. Factory layer — pure construction, no I/O
     # ------------------------------------------------------------------
-    strategy = build_strategy(norm_cfg["strategy"])
-    uni_spec = build_universe_spec(norm_cfg["universe"], norm_cfg["date_range"])
-    val_config = build_validation_config(norm_cfg["validation"])
-    spec = build_experiment_spec(norm_cfg)
+    with recorder.stage("Build strategy, universe & validation objects"):
+        strategy = build_strategy(norm_cfg["strategy"])
+        uni_spec = build_universe_spec(norm_cfg["universe"], norm_cfg["date_range"])
+        val_config = build_validation_config(norm_cfg["validation"])
+        spec = build_experiment_spec(norm_cfg)
 
     # ------------------------------------------------------------------
     # 5. Data loading (I/O lives here, not in the factory)
     # ------------------------------------------------------------------
-    universe = load_universe(list(uni_spec.tickers))
-    prices = align_prices(universe)
+    with (
+        recorder.stage(
+            "Load market data", metadata={"ticker_count": len(uni_spec.tickers)}
+        ) as stage
+    ):
+        universe = load_universe(list(uni_spec.tickers))
+        prices = align_prices(universe)
 
-    # Slice to configured date range
-    prices = prices.loc[uni_spec.start_date : uni_spec.end_date]
+        # Slice to configured date range
+        prices = prices.loc[uni_spec.start_date : uni_spec.end_date]
+        stage.update_metadata(row_count=len(prices))
 
     # ------------------------------------------------------------------
     # 6. Run strategy
     # ------------------------------------------------------------------
     cost_bps = norm_cfg["execution"]["transaction_cost_bps"]
-    sr = run_strategy(prices, strategy, transaction_cost_bps=cost_bps)
+    with recorder.stage(
+        "Backtesting",
+        metadata={
+            "start": str(uni_spec.start_date),
+            "end": str(uni_spec.end_date),
+            "transaction_cost_bps": cost_bps,
+        },
+    ):
+        sr = run_strategy(prices, strategy, transaction_cost_bps=cost_bps)
 
     # ------------------------------------------------------------------
     # 7. Walk-forward validation
@@ -768,79 +813,103 @@ def run_experiment_from_config(path: str | Path, profile: str = "report") -> Exp
     if val_config.type != "none":
         splits = build_validation_splits(val_config, prices.index)
         if splits:
-            wf = run_walk_forward_validation(
-                prices=prices,
-                strategy=strategy,
-                splits=splits,
-                transaction_cost_bps=cost_bps,
-            )
+            with recorder.stage(
+                "Walk-forward validation", metadata={"n_splits_planned": len(splits)}
+            ) as stage:
+                wf = run_walk_forward_validation(
+                    prices=prices,
+                    strategy=strategy,
+                    splits=splits,
+                    transaction_cost_bps=cost_bps,
+                )
+                stage.update_metadata(n_splits=wf.n_splits)
 
     # ------------------------------------------------------------------
     # 8. Build ExperimentResult
     # ------------------------------------------------------------------
-    experiment_result = ExperimentResult(
-        experiment_name=spec.experiment_name,
-        strategy_name=strategy.name,
-        parameters=spec.parameters,
-        metrics=sr.metrics,
-        weights=sr.weights,
-        equity_curve=sr.backtest["equity_curve"],
-        returns=sr.backtest["net_return"],
-        created_at=datetime.now(UTC),
-    )
+    with recorder.stage("Build performance result"):
+        experiment_result = ExperimentResult(
+            experiment_name=spec.experiment_name,
+            strategy_name=strategy.name,
+            parameters=spec.parameters,
+            metrics=sr.metrics,
+            weights=sr.weights,
+            equity_curve=sr.backtest["equity_curve"],
+            returns=sr.backtest["net_return"],
+            created_at=datetime.now(UTC),
+        )
 
     # ------------------------------------------------------------------
     # 9. Plots
     # ------------------------------------------------------------------
-    universe_data_v1 = _prepare_universe_diagnostics(prices)
-    plots = _build_plots(
-        sr.backtest, wf, strategy.name,
-        weights=sr.weights,
-        universe_data=universe_data_v1,
-        profile=profile,
-    )
+    with recorder.stage("Generate figures") as stage:
+        universe_data_v1 = _prepare_universe_diagnostics(prices)
+        # _build_plots() can legitimately hold ~30 figures at once mid-construction
+        # (the destination directory doesn't exist until save_run(), a few lines
+        # below, so they can't be saved-and-closed incrementally as they're made).
+        # Every one of them is closed immediately below or inside save_run() —
+        # this only silences Matplotlib's advisory open-figure-count warning for
+        # that known-safe, self-contained window.
+        import matplotlib.pyplot as plt
+        with plt.rc_context({"figure.max_open_warning": 60}):
+            plots = _build_plots(
+                sr.backtest, wf, strategy.name,
+                weights=sr.weights,
+                universe_data=universe_data_v1,
+                profile=profile,
+            )
+        stage.update_metadata(figure_count=len(plots))
 
     # ------------------------------------------------------------------
     # 10. Save artefacts
     # ------------------------------------------------------------------
     output_cfg = norm_cfg["output"]
-    output_dir = Path(output_cfg["base_dir"])
-    out_path = save_run(
-        experiment_result,
-        spec=spec,
-        output_dir=output_dir,
-        plots=plots if output_cfg.get("save_plots", True) else None,
-    )
-    if output_cfg.get("save_plots", True):
-        _write_plot_index(plots, out_path)
-
-    import matplotlib.pyplot as plt
-    for fig in plots.values():
-        plt.close(fig)
+    with recorder.stage("Persist artefacts") as stage:
+        output_dir = Path(output_cfg["base_dir"])
+        out_path = save_run(
+            experiment_result,
+            spec=spec,
+            output_dir=output_dir,
+            plots=plots if output_cfg.get("save_plots", True) else None,
+        )
+        if output_cfg.get("save_plots", True):
+            # save_run() already closed each figure immediately after saving it.
+            _write_plot_index(plots, out_path)
+        else:
+            # Figures were built but never handed to save_run() — close them here.
+            import matplotlib.pyplot as plt
+            for fig in plots.values():
+                plt.close(fig)
+        stage.update_metadata(artefact_root=str(out_path))
 
     # ------------------------------------------------------------------
     # 11. Write dual config artefacts
     # ------------------------------------------------------------------
-    _write_raw_config(raw_cfg, out_path, source_path)
-    _write_normalized_config(norm_cfg, out_path)
+    with recorder.stage("Write config artefacts"):
+        _write_raw_config(raw_cfg, out_path, source_path)
+        _write_normalized_config(norm_cfg, out_path)
 
     # ------------------------------------------------------------------
     # 11b. Persist diagnostics (consumers of already-computed results)
     # ------------------------------------------------------------------
-    if wf is not None and wf.n_splits > 0:
-        _write_split_metrics(wf, out_path)
-        _write_wf_equity_curves(wf, out_path)
-    _write_backtest_diagnostics(sr, out_path)
-    _write_research_artefacts(prices, strategy, sr, out_path)
-    _write_universe_artefacts(universe_data_v1, out_path)
+    with recorder.stage("Persist diagnostics"):
+        if wf is not None and wf.n_splits > 0:
+            _write_split_metrics(wf, out_path)
+            _write_wf_equity_curves(wf, out_path)
+        _write_backtest_diagnostics(sr, out_path)
+        _write_research_artefacts(prices, strategy, sr, out_path)
+        _write_universe_artefacts(universe_data_v1, out_path)
 
     # ------------------------------------------------------------------
     # 12. Register
     # ------------------------------------------------------------------
     if output_cfg.get("register", True):
-        registry_path = Path(output_cfg["registry_path"])
-        registry = ExperimentRegistry(registry_path)
-        registry.register(experiment_result, spec=spec, path=out_path)
+        with recorder.stage("Register experiment"):
+            registry_path = Path(output_cfg["registry_path"])
+            registry = ExperimentRegistry(registry_path)
+            registry.register(experiment_result, spec=spec, path=out_path)
+
+    write_execution_trace(out_path, recorder.finalize(experiment_name))
 
     return ExperimentRun(
         spec=spec,
@@ -848,6 +917,7 @@ def run_experiment_from_config(path: str | Path, profile: str = "report") -> Exp
         experiment_result=experiment_result,
         walk_forward=wf,
         output_path=out_path,
+        stage_executions=recorder.stages,
     )
 
 
@@ -2938,6 +3008,7 @@ def _run_ml_experiment(
     raw_cfg: dict[str, Any],
     source_path: Path,
     profile: str = "report",
+    execution_trace_base: str | Path | None = None,
 ) -> ExperimentRun:
     """Execute a version "2" ML experiment config.
 
@@ -2948,6 +3019,8 @@ def _run_ml_experiment(
     Args:
         raw_cfg: Raw config dict (already loaded, version == "2").
         source_path: Resolved path to the config file (for dual-config artefacts).
+        execution_trace_base: Override for the live execution-trace JSONL
+            directory — see run_experiment_from_config().
 
     Returns:
         ExperimentRun identical in structure to the D1 pipeline output.
@@ -2963,51 +3036,78 @@ def _run_ml_experiment(
     from src.experiments.ml_factory import build_ml_strategy, build_panel_ml_strategy
     matplotlib.use("Agg")
 
+    experiment_name = str(raw_cfg.get("name") or source_path.stem)
+    trace_path = execution_trace_jsonl_path(
+        experiment_name,
+        **({"base_dir": execution_trace_base} if execution_trace_base is not None else {}),
+    )
+    recorder = StageRecorder(sink=jsonl_sink(trace_path))
+
     # 1-3. Validate and normalize
-    validate_ml_config(raw_cfg)
-    norm_cfg = normalize_ml_config(raw_cfg)
+    with recorder.stage(
+        "Validate & normalise configuration",
+        metadata={"name": experiment_name, "version": "2"},
+    ):
+        validate_ml_config(raw_cfg)
+        norm_cfg = normalize_ml_config(raw_cfg)
 
     # 4. Build ML objects (pure, no I/O)
-    ml_spec = build_ml_experiment_spec(norm_cfg)
-    uni_spec = build_universe_spec(norm_cfg["universe"], norm_cfg["date_range"])
-    is_panel = ml_spec.signal.type in PANEL_SIGNAL_TYPES
+    with recorder.stage("Build strategy & universe objects"):
+        ml_spec = build_ml_experiment_spec(norm_cfg)
+        uni_spec = build_universe_spec(norm_cfg["universe"], norm_cfg["date_range"])
+        is_panel = ml_spec.signal.type in PANEL_SIGNAL_TYPES
 
-    rebalance_frequency_days = ml_spec.rebalance_frequency_days
-    if is_panel:
-        strategy = build_panel_ml_strategy(
-            ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal,
-            list(uni_spec.tickers),
-            portfolio_construction=ml_spec.portfolio_construction,
-            rebalance_frequency_days=rebalance_frequency_days,
-        )
-    else:
-        strategy = build_ml_strategy(
-            ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal
-        )
-    val_config = build_validation_config(norm_cfg["validation"])
+        rebalance_frequency_days = ml_spec.rebalance_frequency_days
+        if is_panel:
+            strategy = build_panel_ml_strategy(
+                ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal,
+                list(uni_spec.tickers),
+                portfolio_construction=ml_spec.portfolio_construction,
+                rebalance_frequency_days=rebalance_frequency_days,
+            )
+        else:
+            strategy = build_ml_strategy(
+                ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal
+            )
+        val_config = build_validation_config(norm_cfg["validation"])
 
-    # Build ExperimentSpec for registry compatibility
-    spec = ExperimentSpec(
-        experiment_name=ml_spec.name,
-        strategy_name=strategy.name,
-        universe=ml_spec.universe,
-        start_date=ml_spec.start_date,
-        end_date=ml_spec.end_date,
-        rebalance_frequency=f"{rebalance_frequency_days}D",
-        parameters=ml_spec.model.params,
-        tags=ml_spec.tags,
-        description=ml_spec.description,
-    )
+        # Build ExperimentSpec for registry compatibility
+        spec = ExperimentSpec(
+            experiment_name=ml_spec.name,
+            strategy_name=strategy.name,
+            universe=ml_spec.universe,
+            start_date=ml_spec.start_date,
+            end_date=ml_spec.end_date,
+            rebalance_frequency=f"{rebalance_frequency_days}D",
+            parameters=ml_spec.model.params,
+            tags=ml_spec.tags,
+            description=ml_spec.description,
+        )
 
     # 5. Data loading
-    universe = load_universe(list(uni_spec.tickers))
-    prices = align_prices(universe)
-    prices = prices.loc[uni_spec.start_date : uni_spec.end_date]
+    with (
+        recorder.stage(
+            "Load market data", metadata={"ticker_count": len(uni_spec.tickers)}
+        ) as stage
+    ):
+        universe = load_universe(list(uni_spec.tickers))
+        prices = align_prices(universe)
+        prices = prices.loc[uni_spec.start_date : uni_spec.end_date]
+        stage.update_metadata(row_count=len(prices))
 
     # 6. Run strategy — fit on full prices first (in-sample full-period run)
     cost_bps = norm_cfg["execution"]["transaction_cost_bps"]
-    strategy.fit(prices)
-    sr = run_strategy(prices, strategy, transaction_cost_bps=cost_bps)
+    with recorder.stage("Model training", metadata={"is_panel": is_panel}):
+        strategy.fit(prices)
+    with recorder.stage(
+        "Backtesting",
+        metadata={
+            "start": str(uni_spec.start_date),
+            "end": str(uni_spec.end_date),
+            "transaction_cost_bps": cost_bps,
+        },
+    ):
+        sr = run_strategy(prices, strategy, transaction_cost_bps=cost_bps)
 
     # 7. Walk-forward validation — fresh model instance to avoid state contamination
     wf: WalkForwardResult | None = None
@@ -3015,160 +3115,182 @@ def _run_ml_experiment(
     if val_config.type != "none":
         splits = build_validation_splits(val_config, prices.index)
         if splits:
-            if is_panel:
-                strategy_wf = build_panel_ml_strategy(
-                    ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal,
-                    list(uni_spec.tickers),
-                    portfolio_construction=ml_spec.portfolio_construction,
-                    rebalance_frequency_days=rebalance_frequency_days,
+            with recorder.stage(
+                "Walk-forward validation", metadata={"n_splits_planned": len(splits)}
+            ) as stage:
+                if is_panel:
+                    strategy_wf = build_panel_ml_strategy(
+                        ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal,
+                        list(uni_spec.tickers),
+                        portfolio_construction=ml_spec.portfolio_construction,
+                        rebalance_frequency_days=rebalance_frequency_days,
+                    )
+                else:
+                    strategy_wf = build_ml_strategy(
+                        ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal
+                    )
+                wf = run_walk_forward_validation(
+                    prices=prices,
+                    strategy=strategy_wf,
+                    splits=splits,
+                    transaction_cost_bps=cost_bps,
+                    retrain_frequency_days=retrain_frequency_days,
                 )
-            else:
-                strategy_wf = build_ml_strategy(
-                    ml_spec.features, ml_spec.labels, ml_spec.model, ml_spec.signal
-                )
-            wf = run_walk_forward_validation(
-                prices=prices,
-                strategy=strategy_wf,
-                splits=splits,
-                transaction_cost_bps=cost_bps,
-                retrain_frequency_days=retrain_frequency_days,
-            )
+                stage.update_metadata(n_splits=wf.n_splits)
 
     # 8. Build ExperimentResult
-    experiment_result = ExperimentResult(
-        experiment_name=ml_spec.name,
-        strategy_name=strategy.name,
-        parameters=ml_spec.model.params,
-        metrics=sr.metrics,
-        weights=sr.weights,
-        equity_curve=sr.backtest["equity_curve"],
-        returns=sr.backtest["net_return"],
-        created_at=datetime.now(UTC),
-    )
+    with recorder.stage("Build performance result"):
+        experiment_result = ExperimentResult(
+            experiment_name=ml_spec.name,
+            strategy_name=strategy.name,
+            parameters=ml_spec.model.params,
+            metrics=sr.metrics,
+            weights=sr.weights,
+            equity_curve=sr.backtest["equity_curve"],
+            returns=sr.backtest["net_return"],
+            created_at=datetime.now(UTC),
+        )
 
     # 9. Pre-compute all diagnostics data (used by both plots and JSON persistence)
-    feature_data = _prepare_feature_diagnostics(strategy, prices, ml_spec, is_panel=is_panel)
-    ml_data = _prepare_ml_diagnostics(strategy, prices, wf, ml_spec, is_panel=is_panel)
-    universe_data = _prepare_universe_diagnostics(prices)
-    # Merge feature diagnostics into ml_data for unified plot generation
-    ml_data.update({k: v for k, v in feature_data.items() if k not in ml_data})
-    ml_data["is_panel"] = is_panel
+    with recorder.stage("Prepare diagnostics"):
+        feature_data = _prepare_feature_diagnostics(strategy, prices, ml_spec, is_panel=is_panel)
+        ml_data = _prepare_ml_diagnostics(strategy, prices, wf, ml_spec, is_panel=is_panel)
+        universe_data = _prepare_universe_diagnostics(prices)
+        # Merge feature diagnostics into ml_data for unified plot generation
+        ml_data.update({k: v for k, v in feature_data.items() if k not in ml_data})
+        ml_data["is_panel"] = is_panel
 
-    # 9a-supplement. Lightweight vol-regime conditional IC statistics (Step 2)
-    try:
-        from src.reporting.regime import compute_regime_stats
-        regime_stats = compute_regime_stats(prices, wf, ml_data)
-        if regime_stats:
-            ml_data["regime_stats"] = regime_stats
-    except Exception:
-        pass
-
-    # 9a-supplement-2: Prediction-strength bucket analysis (Step 3)
-    try:
-        horizon_ps = int(ml_spec.labels.params.get("horizon", 21))
-        ps_data = _prepare_prediction_strength(prices, ml_data, horizon=horizon_ps)
-        if ps_data:
-            ml_data["prediction_strength"] = ps_data
-    except Exception:
-        pass
-
-    # 9a-supplement-3: Ranking geometry diagnostics (Phase I — S1-S5)
-    try:
-        horizon_rg = int(ml_spec.labels.params.get("horizon", 21))
-        rg_data = _prepare_ranking_geometry(prices, ml_data, horizon=horizon_rg)
-        if rg_data:
-            ml_data["ranking_geometry"] = rg_data
-    except Exception:
-        pass
-
-    # 9a-supplement-4: Feature contribution diagnostics (Phase II — C1–C3)
-    try:
-        fc_data = _prepare_feature_contributions(ml_data)
-        if fc_data:
-            ml_data["feature_contributions"] = fc_data
-    except Exception:
-        pass
-
-    # 9a-supplement-5: Allocation research diagnostics (Phase 2 — panel only)
-    if is_panel:
+        # 9a-supplement. Lightweight vol-regime conditional IC statistics (Step 2)
         try:
-            horizon_ar = int(ml_spec.labels.params.get("horizon", 21))
-            alloc_research = _prepare_allocation_research_diagnostics(
-                ml_data, sr.weights, prices, ml_spec, horizon=horizon_ar
-            )
-            if alloc_research:
-                ml_data["alloc_research"] = alloc_research
+            from src.reporting.regime import compute_regime_stats
+            regime_stats = compute_regime_stats(prices, wf, ml_data)
+            if regime_stats:
+                ml_data["regime_stats"] = regime_stats
         except Exception:
             pass
 
-    # 9b. Compute high-volatility stress mask for regime shading on IC figures.
-    # Stress = 21-day realised vol > 2σ of its own rolling 252-day distribution.
-    stress_mask: pd.Series | None = None
-    try:
-        rets = prices.pct_change()
-        vol_panel = rets.rolling(21).std() * (252 ** 0.5)
-        avg_vol = vol_panel.mean(axis=1)
-        threshold = avg_vol.rolling(252, min_periods=63).mean() + \
-                    2.0 * avg_vol.rolling(252, min_periods=63).std()
-        stress_mask = (avg_vol > threshold).reindex(prices.index).fillna(False)
-    except Exception:
-        pass
+        # 9a-supplement-2: Prediction-strength bucket analysis (Step 3)
+        try:
+            horizon_ps = int(ml_spec.labels.params.get("horizon", 21))
+            ps_data = _prepare_prediction_strength(prices, ml_data, horizon=horizon_ps)
+            if ps_data:
+                ml_data["prediction_strength"] = ps_data
+        except Exception:
+            pass
+
+        # 9a-supplement-3: Ranking geometry diagnostics (Phase I — S1-S5)
+        try:
+            horizon_rg = int(ml_spec.labels.params.get("horizon", 21))
+            rg_data = _prepare_ranking_geometry(prices, ml_data, horizon=horizon_rg)
+            if rg_data:
+                ml_data["ranking_geometry"] = rg_data
+        except Exception:
+            pass
+
+        # 9a-supplement-4: Feature contribution diagnostics (Phase II — C1–C3)
+        try:
+            fc_data = _prepare_feature_contributions(ml_data)
+            if fc_data:
+                ml_data["feature_contributions"] = fc_data
+        except Exception:
+            pass
+
+        # 9a-supplement-5: Allocation research diagnostics (Phase 2 — panel only)
+        if is_panel:
+            try:
+                horizon_ar = int(ml_spec.labels.params.get("horizon", 21))
+                alloc_research = _prepare_allocation_research_diagnostics(
+                    ml_data, sr.weights, prices, ml_spec, horizon=horizon_ar
+                )
+                if alloc_research:
+                    ml_data["alloc_research"] = alloc_research
+            except Exception:
+                pass
+
+        # 9b. Compute high-volatility stress mask for regime shading on IC figures.
+        # Stress = 21-day realised vol > 2σ of its own rolling 252-day distribution.
+        stress_mask: pd.Series | None = None
+        try:
+            rets = prices.pct_change()
+            vol_panel = rets.rolling(21).std() * (252 ** 0.5)
+            avg_vol = vol_panel.mean(axis=1)
+            threshold = avg_vol.rolling(252, min_periods=63).mean() + \
+                        2.0 * avg_vol.rolling(252, min_periods=63).std()
+            stress_mask = (avg_vol > threshold).reindex(prices.index).fillna(False)
+        except Exception:
+            pass
 
     # 9c. Plots (receives ml_data with both model + feature diagnostics)
-    plots = _build_plots(
-        sr.backtest, wf, strategy.name,
-        weights=sr.weights,
-        ml_data=ml_data,
-        universe_data=universe_data,
-        stress_mask=stress_mask,
-        profile=profile,
-    )
+    # See the matching comment in run_experiment_from_config(): _build_plots()
+    # can legitimately hold ~30 figures at once mid-construction because the
+    # destination directory doesn't exist yet; all of them are closed
+    # immediately below or inside save_run(), so this only silences the
+    # advisory warning for that known-safe, self-contained window.
+    with recorder.stage("Generate figures") as stage:
+        import matplotlib.pyplot as plt
+        with plt.rc_context({"figure.max_open_warning": 60}):
+            plots = _build_plots(
+                sr.backtest, wf, strategy.name,
+                weights=sr.weights,
+                ml_data=ml_data,
+                universe_data=universe_data,
+                stress_mask=stress_mask,
+                profile=profile,
+            )
+        stage.update_metadata(figure_count=len(plots))
 
     # 10. Save artefacts
     output_cfg = norm_cfg["output"]
-    output_dir = Path(output_cfg["base_dir"])
-    out_path = save_run(
-        experiment_result,
-        spec=spec,
-        output_dir=output_dir,
-        plots=plots if output_cfg.get("save_plots", True) else None,
-    )
-    if output_cfg.get("save_plots", True):
-        _write_plot_index(plots, out_path)
+    with recorder.stage("Persist artefacts") as stage:
+        output_dir = Path(output_cfg["base_dir"])
+        out_path = save_run(
+            experiment_result,
+            spec=spec,
+            output_dir=output_dir,
+            plots=plots if output_cfg.get("save_plots", True) else None,
+        )
+        if output_cfg.get("save_plots", True):
+            # save_run() already closed each figure immediately after saving it.
+            _write_plot_index(plots, out_path)
+        else:
+            # Figures were built but never handed to save_run() — close them here.
+            import matplotlib.pyplot as plt
+            for fig in plots.values():
+                plt.close(fig)
+        stage.update_metadata(artefact_root=str(out_path))
 
-    import matplotlib.pyplot as plt
-    for fig in plots.values():
-        plt.close(fig)
-
-    # Write ML provenance sidecar
-    _write_ml_provenance(ml_spec, out_path)
-
-    # 11. Dual config artefacts
-    _write_raw_config(raw_cfg, out_path, source_path)
-    _write_normalized_config(norm_cfg, out_path)
+    # Write ML provenance sidecar + 11. Dual config artefacts
+    with recorder.stage("Write config artefacts"):
+        _write_ml_provenance(ml_spec, out_path)
+        _write_raw_config(raw_cfg, out_path, source_path)
+        _write_normalized_config(norm_cfg, out_path)
 
     # 11b. Persist diagnostics
-    if wf is not None and wf.n_splits > 0:
-        _write_split_metrics(wf, out_path)
-        _write_wf_equity_curves(wf, out_path)
-    _write_ml_diagnostics(sr, ml_spec.model.type, wf, out_path)
-    _write_ml_model_diagnostics_json(ml_data, ml_spec, out_path)
-    _write_feature_engineering_artefacts(feature_data, ml_spec, out_path)
-    _write_backtest_diagnostics(sr, out_path)
-    _write_research_artefacts(prices, strategy, sr, out_path)
-    _write_universe_artefacts(universe_data, out_path)
-    if is_panel:
-        _write_allocation_diagnostics(
-            sr.weights, ml_spec, out_path,
-            alloc_research=ml_data.get("alloc_research"),
-        )
-    _write_reproducibility_artefacts(ml_data, universe_data, out_path)
+    with recorder.stage("Persist diagnostics"):
+        if wf is not None and wf.n_splits > 0:
+            _write_split_metrics(wf, out_path)
+            _write_wf_equity_curves(wf, out_path)
+        _write_ml_diagnostics(sr, ml_spec.model.type, wf, out_path)
+        _write_ml_model_diagnostics_json(ml_data, ml_spec, out_path)
+        _write_feature_engineering_artefacts(feature_data, ml_spec, out_path)
+        _write_backtest_diagnostics(sr, out_path)
+        _write_research_artefacts(prices, strategy, sr, out_path)
+        _write_universe_artefacts(universe_data, out_path)
+        if is_panel:
+            _write_allocation_diagnostics(
+                sr.weights, ml_spec, out_path,
+                alloc_research=ml_data.get("alloc_research"),
+            )
+        _write_reproducibility_artefacts(ml_data, universe_data, out_path)
 
     # 12. Register
     if output_cfg.get("register", True):
-        registry_path = Path(output_cfg["registry_path"])
-        registry = ExperimentRegistry(registry_path)
-        registry.register(experiment_result, spec=spec, path=out_path)
+        with recorder.stage("Register experiment"):
+            registry_path = Path(output_cfg["registry_path"])
+            registry = ExperimentRegistry(registry_path)
+            registry.register(experiment_result, spec=spec, path=out_path)
+
+    write_execution_trace(out_path, recorder.finalize(experiment_name))
 
     return ExperimentRun(
         spec=spec,
@@ -3176,6 +3298,7 @@ def _run_ml_experiment(
         experiment_result=experiment_result,
         walk_forward=wf,
         output_path=out_path,
+        stage_executions=recorder.stages,
     )
 
 
@@ -3215,11 +3338,14 @@ def run_and_report(
     include_html: bool = True,
     report_spec: Any | None = None,
     profile: str = "report",
+    execution_trace_base: str | Path | None = None,
 ) -> tuple[ExperimentRun, Any]:
     """Run an experiment from config then immediately generate a report.
 
     Thin wrapper: delegates entirely to run_experiment_from_config() then
-    generate_experiment_report().  No additional logic lives here.
+    generate_experiment_report().  No additional logic lives here beyond
+    timing report generation as one more stage on the same execution trace
+    run_experiment_from_config() already started.
 
     Args:
         config_path: Path to the YAML or JSON config file.
@@ -3228,17 +3354,34 @@ def run_and_report(
         report_spec: ResearchReportSpec preset.  None resolves to STANDARD_REPORT.
         profile: Rendering/export profile for canonical figures.
                  "report" (default) or "frontend".
+        execution_trace_base: Override for the live execution-trace JSONL
+                 directory — see run_experiment_from_config().
 
     Returns:
         (ExperimentRun, ReportPaths) tuple.
     """
     from src.reporting.report_builder import generate_experiment_report
 
-    run = run_experiment_from_config(config_path, profile=profile)
-    paths = generate_experiment_report(
-        run.output_path,
-        output_dir=report_output_dir,
-        include_html=include_html,
-        report_spec=report_spec,
+    run = run_experiment_from_config(
+        config_path, profile=profile, execution_trace_base=execution_trace_base,
     )
+
+    experiment_name = run.spec.experiment_name
+    trace_path = execution_trace_jsonl_path(
+        experiment_name,
+        **({"base_dir": execution_trace_base} if execution_trace_base is not None else {}),
+    )
+    recorder = StageRecorder(
+        sink=jsonl_sink(trace_path, reset=False),
+        existing_stages=run.stage_executions,
+    )
+    with recorder.stage("Generate report"):
+        paths = generate_experiment_report(
+            run.output_path,
+            output_dir=report_output_dir,
+            include_html=include_html,
+            report_spec=report_spec,
+        )
+    run.stage_executions = recorder.stages
+    write_execution_trace(run.output_path, recorder.finalize(experiment_name))
     return run, paths

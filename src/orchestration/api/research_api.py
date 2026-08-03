@@ -15,7 +15,8 @@ config per call.  Everything else only reads persisted artefacts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -2560,6 +2561,8 @@ class ExecutionResult:
     report_path: str | None
     error: str | None = None
     command_hint: str | None = None
+    stage_executions: list[dict[str, Any]] | None = None
+    total_duration_s: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2570,6 +2573,8 @@ class ExecutionResult:
             "report_path": self.report_path,
             "error": self.error,
             "command_hint": self.command_hint,
+            "stage_executions": self.stage_executions,
+            "total_duration_s": self.total_duration_s,
         }
 
 
@@ -2669,6 +2674,11 @@ def execute_approved_config(
             report_path = None
 
         artefact_root = Path(run.output_path)
+        stage_executions = [s.to_dict() for s in (run.stage_executions or [])]
+        total_duration_s = (
+            round(sum(s["duration_s"] for s in stage_executions if s["duration_s"] is not None), 3)
+            if stage_executions else None
+        )
         return ExecutionResult(
             config_path=str(config_path),
             experiment_name=artefact_root.name,
@@ -2677,6 +2687,8 @@ def execute_approved_config(
             report_path=report_path,
             error=None,
             command_hint=command_hint,
+            stage_executions=stage_executions,
+            total_duration_s=total_duration_s,
         )
     except Exception as exc:  # noqa: BLE001 — surface a clean result, never raise
         return ExecutionResult(
@@ -2851,3 +2863,259 @@ def get_research_workflow_state(
         "report_path": revised_report or base_report_path,
         "plots_dir": revised_plots or base_plots_dir,
     }
+
+
+# ---------------------------------------------------------------------------
+# Workflow Trace (observability only — see
+# docs/architecture/WORKFLOW_TRACE_ARCHITECTURE_DESIGN_PROPOSAL.md)
+#
+# A derived projection over state that already exists: ResearchSession's
+# event log/active_experiment, and get_research_workflow_state()'s
+# artefact-existence snapshot. Introduces no new persisted store — nothing
+# here is written to disk beyond what record_session_event() already writes
+# for its own reasons.
+#
+# _workflow_progression_step() is the single authoritative definition of
+# workflow progression the design proposal's Step 1 requires: both
+# next_tool_and_display() (the advisory next-step text every
+# check_research_workflow_state call already returned) and
+# compute_workflow_trace() (new) derive from it. Previously
+# src/mcp/zeto_server.py held an independent copy of this same branch logic
+# under a different name (_workflow_next_and_display) — that copy is removed
+# as part of this change; zeto_server.py now calls next_tool_and_display()
+# below instead.
+# ---------------------------------------------------------------------------
+
+
+class WorkflowPhase(StrEnum):
+    """Names the branches of _workflow_progression_step() — no new derivation,
+    only names for control flow that already existed as an unnamed if/elif
+    chain (formerly _workflow_next_and_display in zeto_server.py)."""
+
+    NEEDS_BASELINE_EXECUTION = "needs_baseline_execution"
+    NEEDS_REVIEW = "needs_review"
+    NEEDS_PROPOSAL = "needs_proposal"
+    NEEDS_DRAFT = "needs_draft"
+    NEEDS_APPROVAL = "needs_approval"
+    NEEDS_RENDER = "needs_render"
+    NEEDS_EXECUTION = "needs_execution"
+    # EXECUTING is never returned by _phase_from_state()/_workflow_progression_step():
+    # that function only ever runs BETWEEN calls, on a point-in-time artefact
+    # snapshot — it cannot observe a synchronous execute_approved_config call
+    # while that call is still in flight (design proposal §7/Risk 3). It is
+    # kept as a named value for API completeness and for the display-text
+    # integration (design proposal §6.3/§13 Step 4) that would set it
+    # explicitly from inside execute_approved_config's own response — not
+    # implemented in this change; see the accompanying implementation report.
+    EXECUTING = "executing"
+    NEEDS_POST_RUN_REVIEW = "needs_post_run_review"
+    IDLE = "idle"
+
+
+_WORKFLOW_OWNER_BY_PHASE: dict[WorkflowPhase, str] = {
+    WorkflowPhase.NEEDS_BASELINE_EXECUTION: "Render & Execution Engine",
+    WorkflowPhase.NEEDS_REVIEW: "Review Engine",
+    WorkflowPhase.NEEDS_PROPOSAL: "Proposal & Draft Pipeline",
+    WorkflowPhase.NEEDS_DRAFT: "Proposal & Draft Pipeline",
+    WorkflowPhase.NEEDS_APPROVAL: "Approval Gate",
+    WorkflowPhase.NEEDS_RENDER: "Render & Execution Engine",
+    WorkflowPhase.NEEDS_EXECUTION: "Render & Execution Engine",
+    WorkflowPhase.EXECUTING: "Render & Execution Engine",
+    WorkflowPhase.NEEDS_POST_RUN_REVIEW: "Review Engine",
+    WorkflowPhase.IDLE: "Idle",
+}
+
+_WORKFLOW_STATUS_BY_PHASE: dict[WorkflowPhase, str] = {
+    WorkflowPhase.NEEDS_BASELINE_EXECUTION: "waiting_for_user",
+    WorkflowPhase.NEEDS_REVIEW: "needs_next_step",
+    WorkflowPhase.NEEDS_PROPOSAL: "needs_next_step",
+    WorkflowPhase.NEEDS_DRAFT: "needs_next_step",
+    WorkflowPhase.NEEDS_APPROVAL: "waiting_for_user",
+    WorkflowPhase.NEEDS_RENDER: "needs_next_step",
+    WorkflowPhase.NEEDS_EXECUTION: "waiting_for_user",
+    WorkflowPhase.EXECUTING: "executing",
+    WorkflowPhase.NEEDS_POST_RUN_REVIEW: "needs_next_step",
+    WorkflowPhase.IDLE: "idle",
+}
+
+
+def _workflow_progression_step(state: dict[str, Any]) -> tuple[WorkflowPhase, str, str]:
+    """The single authoritative workflow-progression definition.
+
+    Returns ``(phase, next_tool, display_fragment)`` for one experiment's
+    artefact-existence snapshot (the dict ``get_research_workflow_state()``
+    already returns). Branch order and conditions are unchanged from the
+    prior ``_workflow_next_and_display`` — only phase names were added.
+    """
+    if not state["context_ready"]:
+        return (
+            WorkflowPhase.NEEDS_BASELINE_EXECUTION,
+            "execute_approved_config",
+            "baseline artefacts missing — execute the baseline config (confirmation='RUN')",
+        )
+    if not state["review_exists"]:
+        return (
+            WorkflowPhase.NEEDS_REVIEW,
+            "run_experiment_review",
+            "baseline artefacts exist; review missing",
+        )
+    if not state["proposal_exists"]:
+        return (
+            WorkflowPhase.NEEDS_PROPOSAL,
+            "generate_iteration_proposal",
+            "review exists; proposal missing",
+        )
+    if not state["draft_exists"]:
+        return (
+            WorkflowPhase.NEEDS_DRAFT,
+            "generate_experiment_draft",
+            "proposal exists; draft missing",
+        )
+    if not state["latest_draft_approved"]:
+        return (
+            WorkflowPhase.NEEDS_APPROVAL,
+            "approve_experiment_draft",
+            f"draft {state['latest_draft_id']} exists (unapproved) — validate, then approve",
+        )
+    if not state["rendered_yaml_exists"]:
+        return (
+            WorkflowPhase.NEEDS_RENDER,
+            "render_draft_to_yaml",
+            "draft approved; YAML not yet rendered",
+        )
+    if not state["revised_artefacts_exist"]:
+        return (
+            WorkflowPhase.NEEDS_EXECUTION,
+            "execute_approved_config",
+            "YAML rendered; revised experiment not yet executed (confirmation='RUN')",
+        )
+    return (
+        WorkflowPhase.NEEDS_POST_RUN_REVIEW,
+        "review_post_run_result",
+        "revised artefacts exist; ready for post-run review",
+    )
+
+
+def next_tool_and_display(state: dict[str, Any]) -> tuple[str, str]:
+    """Map a workflow-state dict to (next_suggested_action, concise display).
+
+    Advisory only — names the single recommended next tool based on which
+    artefacts already exist; it never runs anything. Thin formatting layer
+    over ``_workflow_progression_step()``, the one authoritative definition
+    (previously this logic was duplicated as ``_workflow_next_and_display``
+    in ``zeto_server.py``; that copy has been removed).
+    """
+    _phase, next_tool, fragment = _workflow_progression_step(state)
+    name = state["experiment_name"]
+    return next_tool, f"[{name}] {fragment}. Next suggested action: {next_tool}."
+
+
+@dataclass
+class WorkflowTrace:
+    """Derived orchestration-level projection — who owns the workflow, what
+    phase it's in, what's next. Never a persisted store: every field is
+    computed fresh from ResearchSession + get_research_workflow_state() on
+    each call. See WORKFLOW_TRACE_ARCHITECTURE_DESIGN_PROPOSAL.md.
+    """
+
+    workflow_id: str
+    experiment_name: str | None
+    current_owner: str
+    current_phase: str
+    current_action: str | None
+    current_tool: str | None
+    status: str
+    execution: dict[str, Any] | None
+    started_at: str | None
+    updated_at: str | None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "workflow_id": self.workflow_id,
+            "experiment_name": self.experiment_name,
+            "current_owner": self.current_owner,
+            "current_phase": self.current_phase,
+            "current_action": self.current_action,
+            "current_tool": self.current_tool,
+            "status": self.status,
+            "execution": self.execution,
+            "started_at": self.started_at,
+            "updated_at": self.updated_at,
+            "metadata": self.metadata,
+        }
+
+
+def compute_workflow_trace(
+    session_id: str,
+    experiment_name: str | None = None,
+    sessions_base: Path | str | None = None,
+    base: Path | str | None = None,
+    llm_base: Path | str | None = None,
+    configs_base: Path | str | None = None,
+    reports_base: Path | str | None = None,
+) -> WorkflowTrace:
+    """Derive a WorkflowTrace for one research session — pure, read-only.
+
+    Reuses ``ResearchSession`` (session-scoped: event log, active_experiment)
+    and ``get_research_workflow_state()`` (experiment-scoped: artefact
+    existence); introduces no new persisted state.
+
+    ``experiment_name`` defaults to ``session.active_experiment``; pass it
+    explicitly for a session that has touched more than one experiment.
+
+    ``execution`` is always ``None`` — a live execution can only be observed
+    synchronously, from inside the ``execute_approved_config`` call itself
+    (design proposal §7); that integration is design proposal §13 Step 4,
+    not implemented here (Steps 1-3 only — see the accompanying
+    implementation report).
+
+    Raises:
+        ValueError: If no session exists for ``session_id``.
+    """
+    session = load_research_session(session_id, sessions_base=sessions_base)
+    if session is None:
+        raise ValueError(f"No research session found for session_id={session_id!r}")
+
+    resolved_experiment = experiment_name or session.active_experiment
+    if not resolved_experiment:
+        return WorkflowTrace(
+            workflow_id=session_id,
+            experiment_name=None,
+            current_owner=_WORKFLOW_OWNER_BY_PHASE[WorkflowPhase.IDLE],
+            current_phase=WorkflowPhase.IDLE.value,
+            current_action=None,
+            current_tool=None,
+            status=_WORKFLOW_STATUS_BY_PHASE[WorkflowPhase.IDLE],
+            execution=None,
+            started_at=session.created_at,
+            updated_at=session.updated_at,
+        )
+
+    state = get_research_workflow_state(
+        resolved_experiment, base=base, llm_base=llm_base,
+        configs_base=configs_base, reports_base=reports_base,
+    )
+    phase, next_tool, _fragment = _workflow_progression_step(state)
+    last_event = session.events[-1] if session.events else None
+
+    metadata = {
+        k: v for k, v in {
+            "latest_draft_id": state.get("latest_draft_id"),
+            "proposed_name": state.get("proposed_name"),
+        }.items() if v is not None
+    }
+
+    return WorkflowTrace(
+        workflow_id=session_id,
+        experiment_name=resolved_experiment,
+        current_owner=_WORKFLOW_OWNER_BY_PHASE[phase],
+        current_phase=phase.value,
+        current_action=last_event.event_type if last_event else None,
+        current_tool=next_tool,
+        status=_WORKFLOW_STATUS_BY_PHASE[phase],
+        execution=None,
+        started_at=session.created_at,
+        updated_at=session.updated_at,
+        metadata=metadata,
+    )

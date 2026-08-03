@@ -8,20 +8,21 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def save_figure(fig: plt.Figure, path: str | Path, close: bool = True) -> Path:
+def save_figure(fig: plt.Figure, path: str | Path, close: bool = True, **savefig_kwargs) -> Path:
     """Save ``fig`` to ``path``, creating parent directories as needed.
 
     Args:
         fig: The matplotlib Figure to save.
         path: Destination file path.  Extension determines format (.png, .pdf, etc.).
         close: Close the figure after saving to release memory (default True).
+        **savefig_kwargs: Forwarded to ``fig.savefig()`` (e.g. ``bbox_inches``, ``dpi``).
 
     Returns:
         Resolved Path of the saved file.
     """
     dest = Path(path).resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(dest)
+    fig.savefig(dest, **savefig_kwargs)
     if close:
         plt.close(fig)
     return dest

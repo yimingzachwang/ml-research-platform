@@ -328,7 +328,7 @@ class TestToolRegistration:
 
     def test_total_tool_count_is_50(self):
         names = {t.name for t in zeto.mcp._tool_manager.list_tools()}
-        assert len(names) == 50  # +1 Phase-5G.2 route_research_request
+        assert len(names) == 51  # +1 Phase-5G.2 route_research_request + 1 Workflow Trace get_workflow_trace
 
     def test_tool_has_description(self):
         by_name = {t.name: t.description for t in zeto.mcp._tool_manager.list_tools()}

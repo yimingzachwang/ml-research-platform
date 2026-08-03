@@ -974,3 +974,169 @@ class TestRunAndReportPreset:
             )
         manifest = json.loads(paths.manifest.read_text())
         assert manifest.get("report_spec") == "CANONICAL_SHOWCASE"
+
+
+# ---------------------------------------------------------------------------
+# Execution progress & profiling — observability only (no execution-flow or
+# numerical-output change; see docs/architecture/
+# EXECUTION_PROGRESS_AND_PROFILING_DESIGN_PROPOSAL.md).
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionTraceEndToEnd:
+    """Real engine runs (only data loading is mocked) exercising the full
+    stage-recording + execution_trace.json + research_api chain."""
+
+    def test_v1_run_records_stage_executions_in_order(self, tmp_path: Path):
+        p = _write_v1_cfg(tmp_path)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES_V1)):
+            run = run_experiment_from_config(p, execution_trace_base=tmp_path / "trace")
+        names = [s.name for s in run.stage_executions]
+        assert names == [
+            "Validate & normalise configuration",
+            "Build strategy, universe & validation objects",
+            "Load market data",
+            "Backtesting",
+            "Build performance result",
+            "Generate figures",
+            "Persist artefacts",
+            "Write config artefacts",
+            "Persist diagnostics",
+            "Register experiment",
+        ]
+        assert all(s.status == "completed" for s in run.stage_executions)
+
+    def test_v1_run_writes_durable_execution_trace(self, tmp_path: Path):
+        p = _write_v1_cfg(tmp_path)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES_V1)):
+            run = run_experiment_from_config(p, execution_trace_base=tmp_path / "trace")
+        trace = json.loads((run.output_path / "execution_trace.json").read_text())
+        assert trace["experiment_name"] == "wf_v1_test"
+        assert trace["status"] == "completed"
+        assert trace["total_duration_s"] >= 0.0
+        assert len(trace["stages"]) == len(run.stage_executions)
+
+    def test_v1_run_numerical_output_unaffected(self, tmp_path: Path):
+        """Same assertion as TestV1Workflow — proves stage instrumentation
+        changed no computation, only added observability."""
+        p = _write_v1_cfg(tmp_path)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES_V1)):
+            run = run_experiment_from_config(p, execution_trace_base=tmp_path / "trace")
+        metrics = json.loads((run.output_path / "metrics.json").read_text())
+        assert "sharpe_ratio" in metrics
+        violations = check_artefact_dir(run.output_path)
+        assert violations == [], violations
+
+    def test_v2_run_includes_model_training_and_backtesting_as_separate_stages(
+        self, tmp_path: Path
+    ):
+        p = _write_v2_cfg(tmp_path)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES_V2)):
+            run = run_experiment_from_config(p, execution_trace_base=tmp_path / "trace")
+        names = [s.name for s in run.stage_executions]
+        assert "Model training" in names
+        assert "Backtesting" in names
+        assert names.index("Model training") < names.index("Backtesting")
+
+    def test_run_and_report_appends_generate_report_stage(self, tmp_path: Path):
+        from src.experiments.orchestrator import run_and_report
+
+        p = _write_v2_wf_cfg(tmp_path)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES_V2)):
+            run, paths = run_and_report(
+                p,
+                report_output_dir=tmp_path / "reports",
+                execution_trace_base=tmp_path / "trace",
+            )
+        names = [s.name for s in run.stage_executions]
+        assert names[-1] == "Generate report"
+        assert run.stage_executions[-1].status == "completed"
+        trace = json.loads((run.output_path / "execution_trace.json").read_text())
+        assert trace["stages"][-1]["name"] == "Generate report"
+        assert paths.markdown.exists()  # report generation itself still works
+
+    def test_research_api_execute_approved_config_real_engine(self, tmp_path: Path):
+        """The orchestration API boundary, unmocked below research_api itself —
+        proves ExecutionResult.stage_executions/total_duration_s are populated
+        from a real run, and existing fields are unaffected."""
+        from src.orchestration.api import research_api
+
+        p = _write_v1_cfg(tmp_path)
+        with patch(_PATCH, side_effect=_make_load_universe_patch(_PRICES_V1)):
+            result = research_api.execute_approved_config(
+                p, report=False,
+            )
+        assert result.success is True
+        assert result.experiment_name == "wf_v1_test"
+        assert result.stage_executions is not None
+        assert len(result.stage_executions) == 10
+        assert result.total_duration_s is not None
+        assert result.total_duration_s >= 0.0
+        assert result.stage_executions[0]["name"] == "Validate & normalise configuration"
+
+    def test_research_api_dry_run_unaffected(self):
+        from src.orchestration.api import research_api
+
+        result = research_api.execute_approved_config("any/path.yaml", dry_run=True)
+        assert result.success is True
+        assert result.stage_executions is None
+        assert result.total_duration_s is None
+
+    def test_research_api_missing_config_governance_unaffected(self):
+        from src.orchestration.api import research_api
+
+        result = research_api.execute_approved_config("does/not/exist.yaml")
+        assert result.success is False
+        assert result.stage_executions is None
+
+
+# ---------------------------------------------------------------------------
+# Workflow Trace — full stack, zero mocking (MCP tool -> research_api ->
+# session persistence -> artefact inspection), unlike test_zeto_mcp_server.py
+# which deliberately mocks the Research API boundary. Uses a random
+# never-executed experiment name so no real experiment config is required;
+# the real session file this test creates under results/research_sessions/
+# is removed in a finally block. See
+# docs/architecture/WORKFLOW_TRACE_ARCHITECTURE_DESIGN_PROPOSAL.md.
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowTraceEndToEnd:
+    def test_full_stack_no_mocking(self):
+        import shutil
+        import uuid
+
+        from src.mcp import zeto_server as zeto
+        from src.orchestration.utils.filesystem import session_dir
+
+        experiment_name = f"wf_trace_e2e_{uuid.uuid4().hex[:8]}"
+        created = zeto.create_research_session(experiment_name, "workflow trace smoke test")
+        assert created["ok"] is True
+        session_id = created["data"]["session_id"]
+
+        try:
+            # Real MCP tool -> real research_api.compute_workflow_trace() ->
+            # real load_research_session() + real get_research_workflow_state()
+            # against the real results/ tree — no mock anywhere in this call.
+            out = zeto.get_workflow_trace(session_id)
+
+            assert out["ok"] is True
+            assert out["stage"] == "workflow_trace"
+            data = out["data"]
+            assert data["workflow_id"] == session_id
+            assert data["experiment_name"] == experiment_name
+            # A brand-new, never-executed experiment has no artefacts at all.
+            assert data["current_phase"] == "needs_baseline_execution"
+            assert data["current_owner"] == "Render & Execution Engine"
+            assert data["status"] == "waiting_for_user"
+            assert data["current_tool"] == "execute_approved_config"
+            assert data["execution"] is None
+            assert out["next_suggested_action"] == "execute_approved_config"
+
+            # check_research_workflow_state must agree — both now derive
+            # from the exact same research_api.next_tool_and_display() /
+            # _workflow_progression_step() call.
+            state_out = zeto.check_research_workflow_state(experiment_name)
+            assert state_out["next_suggested_action"] == data["current_tool"]
+        finally:
+            shutil.rmtree(session_dir(session_id), ignore_errors=True)
