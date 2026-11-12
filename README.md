@@ -1,6 +1,6 @@
 # Machine Learning Research & Experimentation Platform
 
-A modular Python research platform for reproducible machine learning experimentation, time-series prediction, out-of-sample generalisation assessment, and AI-assisted research workflows. It combines supervised learning, leakage-aware feature and label pipelines, walk-forward validation, model diagnostics, and provenance-tracked experiments, using financial time series as a real-world research testbed.
+A machine learning research platform for predictive modelling, temporal generalisation, and systematic decision-making in financial markets. Its modular Python workflow connects reproducible supervised learning and model diagnostics with portfolio construction, historical backtesting, and AI-assisted research iteration. Financial markets are the central research domain: experiments examine both the predictive information learned from historical observations and the consequences of using that information to make allocation decisions.
 
 [![CI](https://github.com/yimingzachwang/ml-research-platform/actions/workflows/ci.yaml/badge.svg)](https://github.com/yimingzachwang/ml-research-platform/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -9,19 +9,15 @@ A modular Python research platform for reproducible machine learning experimenta
 
 ## Overview
 
-The platform connects three parts of applied ML research:
+Financial markets combine noisy observations, temporal dependencies, non-stationarity, and weak predictive relationships. The platform uses ETF time series to investigate whether engineered features and regularised supervised models can extract predictive information from historical data. Walk-forward validation and model stability diagnostics assess how learned relationships behave in subsequent periods. Regime-conditional diagnostics describe historical variation; they do not establish robustness to future distribution changes.
 
-- **Machine learning methodology:** deterministic feature engineering, explicit prediction targets, regularised supervised models, temporal evaluation, and model stability analysis.
-- **Research engineering:** typed data contracts, dataset registries, declarative experiment configurations, persisted artefacts, automated tests, and reproducible reporting.
-- **AI-assisted experimentation:** structured LLM research reviews, experiment comparisons, configuration proposals, and human-governed research iteration.
+Predictive modelling and financial decision-making form one research process. Portfolio construction translates forecasts and cross-sectional rankings into selection and allocation decisions. Historical backtesting evaluates those decisions under explicit rebalancing and transaction-cost assumptions, with turnover, drawdown, and risk-adjusted performance analysed alongside prediction quality. Statistical predictive performance alone does not establish that a model produces useful financial decisions.
 
-Financial time series provide noisy observations, temporal dependencies, changing distributions, and limited predictive signal. These properties make ETF datasets a demanding environment for examining model behaviour and assessing generalisation across historical periods. Regime-conditional diagnostics describe variation in observed performance; they do not establish robustness to future distribution changes.
-
-Portfolio construction and historical backtesting provide downstream evaluation of predictions. The research focus is the relationship between data, model assumptions, temporal validation, and reproducible evidence.
+Typed data contracts, dataset registries, declarative experiment configurations, provenance-tracked artefacts, automated tests, and reproducible reports make this process inspectable. Structured LLM reviews and experiment comparisons help researchers interpret the evidence and propose refinements, with human approval governing subsequent configuration changes. Machine learning remains the methodological focus throughout this research workflow.
 
 ## ML Research Showcase
 
-The linked reports document completed experiments. Their datasets, model settings, diagnostics, and results describe those saved runs; current YAML configurations may have evolved since report generation.
+The following completed experiments connect supervised prediction, temporal evaluation, and financial decision analysis. Their datasets, model settings, diagnostics, and results describe those saved runs; current YAML configurations may have evolved since report generation.
 
 ### Canonical ML Showcase
 
@@ -48,18 +44,24 @@ Evaluation includes cross-sectional rank information coefficients, prediction-sc
 
 The [signal geometry synthesis](reports/signal_geometry/signal_geometry_synthesis.md) and [allocation synthesis](reports/allocation_study/allocation_study_synthesis.md) retain the experiment matrices and diagnostic findings, including limited sensitivity within the tested settings. Their conclusions are specific to those datasets and configurations.
 
-### Non-ML Financial Research Application
+### Rule-Based Reference Strategy: Momentum Rotation
 
 [Momentum Rotation](reports/markdown/example_momentum_rotation.md) · 7-ETF universe · 2015–2024
 
-A rule-based trailing 252-day momentum signal with month-end rebalancing demonstrates the non-ML research path. Its report covers signal construction, portfolio rules, walk-forward evaluation, and risk factors such as momentum reversals, concentration, lookback sensitivity, and transaction-cost drag. It provides a baseline methodology alongside the supervised learning examples, rather than a matched benchmark with identical experimental settings.
+A rule-based trailing 252-day momentum signal with month-end rebalancing provides a methodological reference point alongside the ML-based approaches. Its report covers signal construction, portfolio rules, walk-forward evaluation, and risk factors such as momentum reversals, concentration, lookback sensitivity, and transaction-cost drag. Rule-based strategies make signal and decision rules explicit, helping researchers examine which assumptions are shared with learned approaches. This saved experiment uses different settings from the ML showcases and does not establish a directly controlled comparison against them.
 
 ## Machine Learning Methodology
 
+The research lifecycle connects the predictive task to the decisions made from its outputs and the evidence used to refine the next experiment:
+
 ```text
-Data ingestion → Feature engineering → Label construction → Model training
-    → Temporal validation → Model diagnostics → Experiment comparison → Research reporting
+Financial data preparation → Feature engineering → Label construction
+    → Supervised learning → Walk-forward validation → Prediction diagnostics
+    → Portfolio construction → Historical backtesting → Risk and performance analysis
+    → Experiment comparison → Research reporting → AI-assisted review and refinement
 ```
+
+This is the conceptual research sequence. Within walk-forward evaluation, each test window includes prediction, portfolio construction, and historical backtesting; diagnostics and reports summarise evidence across windows. AI-assisted review informs researcher-approved refinements to subsequent experiments.
 
 ### Features, Targets, and Temporal Alignment
 
@@ -87,9 +89,29 @@ Implemented model diagnostics include regression errors, prediction correlation,
 
 Declarative YAML configurations specify features, labels, model parameters, signal translation, validation, and execution assumptions. The [`src/research_search/`](src/research_search/) framework enumerates controlled comparisons of Ridge, Lasso, and ElasticNet across feature groups and transaction-cost settings. These comparisons and the showcase studies make experimental choices inspectable; they do not constitute a general-purpose automated hyperparameter optimiser.
 
+## From ML Predictions to Financial Decisions
+
+ETF return forecasting and cross-sectional asset ranking define the predictive tasks; portfolio construction specifies how their outputs influence decisions. Prediction scores can be translated into top-N selection and alternative allocation rules, with rebalancing determining when allocations change. Historical backtesting then evaluates the resulting portfolios under configured transaction-cost assumptions.
+
+These stages answer related but distinct research questions:
+
+| Evaluation level | Implemented evidence | Research question |
+|---|---|---|
+| Statistical predictive performance | Regression errors, prediction correlation, and directional accuracy | How closely do predictions match the chosen targets? |
+| Cross-sectional ranking quality | Spearman information coefficients and prediction-score outcome groups | Do higher model scores identify assets with stronger subsequent outcomes? |
+| Portfolio-level outcomes | Portfolio returns, equity curves, and allocation concentration | What outcomes follow from the selection, weighting, and rebalancing rules? |
+| Transaction costs and turnover | Changes in portfolio weights and simulated transaction-cost deductions | How much does changing allocations erode the returns associated with predictions? |
+| Risk-adjusted performance | Annualised return and volatility, maximum drawdown, Sharpe ratio, and Calmar ratio | How do historical returns compare with their variability and losses? |
+
+Predictive accuracy does not necessarily translate into useful decisions. A model may rank assets favourably while small score changes generate frequent portfolio changes and higher transaction costs. Allocation concentration and the timing of losses can also affect portfolio outcomes without a corresponding change in aggregate prediction error. Model diagnostics, ranking analysis, and portfolio evaluation therefore need to be interpreted together.
+
+The controlled allocation study above examines this connection by holding the predictive setup fixed while varying the weighting rule. Walk-forward stability, regime-conditional analysis, and strategy comparison help researchers assess where prediction and decision outcomes agree or diverge. Conclusions remain specific to the historical data and experimental assumptions.
+
+The platform is intended for research rather than live trading. It has no live broker integration, order management, or live position tracking. Historical model and portfolio results support research review; they are not deployment guarantees.
+
 ## AI-Assisted Research Orchestration
 
-The AI layer helps researchers interpret experimental evidence and propose subsequent work. LLM reasoning is separated from deterministic configuration resolution, validation, and numerical experiment execution. Workflows are researcher-initiated, and generated drafts require explicit human approval before rendering to experiment YAML.
+The prediction diagnostics, portfolio results, and controlled comparisons above provide the evidence for the next research iteration. The AI layer helps researchers interpret this evidence and propose subsequent work. LLM reasoning is separated from deterministic configuration resolution, validation, and numerical experiment execution. Workflows are researcher-initiated, and generated drafts require explicit human approval before rendering to experiment YAML.
 
 | Capability | Implemented workflow |
 |---|---|
@@ -107,9 +129,9 @@ See the [orchestration overview](docs/ai_orchestration/overview.md) and [governe
 
 ## Research Infrastructure
 
-The architecture connects data preparation, supervised learning, experiment execution, and reporting through modular Python packages. Typed exchange objects and explicit configuration keep research assumptions visible. The FastAPI bridge calls the Research API, with tests checking that routers do not reach directly into numerical engine internals.
+Reproducing the path from market observations to model predictions and portfolio outcomes requires consistent data, configuration, and artefact handling. The architecture connects data preparation, supervised learning, portfolio evaluation, experiment execution, and reporting through modular Python packages. Typed exchange objects and explicit configuration keep research assumptions visible. The FastAPI bridge calls the Research API, with tests checking that routers do not reach directly into numerical engine internals.
 
-The existing layered architecture is shown below. ML training and diagnostics sit alongside the portfolio components that evaluate their outputs.
+The existing layered architecture is shown below. Feature pipelines and supervised models produce predictions; portfolio and backtesting components evaluate the decisions derived from them, and reporting supplies evidence to the research orchestration layer.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -205,7 +227,7 @@ ml-research-platform/
 
 ## Engineering Quality
 
-The test suite covers data contracts, feature transformations, supervised datasets, models, temporal validation, experiment persistence, reporting, orchestration, and API boundaries. Unit, contract, integration, and architectural tests separate implementation correctness from claims about predictive performance.
+These research workflows depend on verifiable implementation contracts for data alignment, temporal boundaries, prediction interfaces, and artefact persistence. The test suite covers data contracts, feature transformations, supervised datasets, models, temporal validation, experiment persistence, reporting, orchestration, and API boundaries. Unit, contract, integration, and architectural tests separate implementation correctness from claims about predictive performance.
 
 A static inventory of this revision contains:
 
@@ -219,12 +241,6 @@ There are 4,827 test function definitions before pytest parametrisation. The [ea
 [`tests/api/test_api_non_coupling.py`](tests/api/test_api_non_coupling.py) checks all five router modules for forbidden direct imports, experiment execution calls, automatic lineage registration, and background-task patterns. These are explicit API boundary checks rather than a claim that every dependency in the repository is enforced by a universal layer rule.
 
 Ruff checks linting and import ordering; Black handles formatting; `mypy` is configured in strict mode for `src/`. Pre-commit hooks run Ruff, formatting, and pytest. [CI](.github/workflows/ci.yaml) runs Ruff, Black, and pytest on Python 3.11 for pull requests and pushes to `main`.
-
-## Financial Research Applications
-
-The implemented application workflows include ETF return forecasting, cross-sectional asset ranking, portfolio construction, historical backtesting, and strategy comparison. Prediction outputs can be translated into top-N selection and alternative allocation rules, with drawdown, turnover, transaction-cost, and regime-conditional analysis used to examine downstream consequences.
-
-The platform is intended for research rather than live trading. It has no live broker integration, order management, or live position tracking. Historical model and portfolio results support research review; they are not deployment guarantees.
 
 ## Installation and Usage
 
